@@ -1,0 +1,12 @@
+# udev rules for SIMtrace2 USB sniffing (simtrace2-pysniff)
+#
+# Install:
+#   sudo cp 70-simtrace2-pysniff.rules /etc/udev/rules.d/
+#   sudo udevadm control --reload-rules
+#   sudo udevadm trigger
+
+ACTION!="add", GOTO="pysniff_end"
+SUBSYSTEM!="usb", GOTO="pysniff_end"
+ATTRS{idVendor}=="1d50", ATTRS{idProduct}=="60e3", TAG+="uaccess"
+ATTRS{idVendor}=="1d50", ATTRS{idProduct}=="616e", TAG+="uaccess"
+LABEL="pysniff_end"
