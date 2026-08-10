@@ -1,6 +1,7 @@
 """Hex dump formatters for simtrace2 sniffing output."""
 
-import sys
+import time
+from datetime import datetime
 
 
 def hexdump(data, sep=' '):
@@ -25,7 +26,20 @@ def _flag_str(flags, flag_names):
     return ', '.join(names)
 
 
-def format_message(msg, *, show_flags=True):
+def tpdu_timestamp_prefix(msg):
+    """Return ``[HH:MM:SS.mmm]`` for a message timestamp (local time)."""
+    dt = datetime.fromtimestamp(msg.timestamp)
+    return f"[{dt.strftime('%H:%M:%S')}.{dt.microsecond // 1000:03d}]"
+
+
+def tpdu_atr_time_prefix(elapsed_sec):
+    """Return ``[SSSS.mmm]`` — zero-filled seconds + milliseconds."""
+    s = int(elapsed_sec)
+    ms = int((elapsed_sec - s) * 1000)
+    return f"[{s:04d}.{ms:03d}]"
+
+
+def format_message(msg, *, show_flags=True, tpdu_prefix=''):
     """Format a SniffMessage as a human-readable line.
 
     Returns a str suitable for stdout or file output.
@@ -70,7 +84,7 @@ def format_message(msg, *, show_flags=True):
         flags_str = ''
         if show_flags and msg.flags:
             flags_str = f' ({_flag_str(msg.flags, data_flag_names)})'
-        line = f'{type_label}{flags_str}: {hexdump(msg.data)}'
+        line = f'{tpdu_prefix}{type_label}{flags_str}: {hexdump(msg.data)}'
 
     return line
 
@@ -78,11 +92,20 @@ def format_message(msg, *, show_flags=True):
 class FileDumper:
     """Write formatted sniff messages to a file."""
 
-    def __init__(self, path):
+    def __init__(self, path, fmt='hex'):
+        self._fmt = fmt
         self._f = open(path, 'a', buffering=1)
+        self._atr_start = time.monotonic()
 
     def write(self, msg):
-        line = format_message(msg)
+        tpdu_prefix = ''
+        if self._fmt == 'timestamp' and msg.type == 'tpdu':
+            tpdu_prefix = tpdu_timestamp_prefix(msg)
+        elif self._fmt == 'atr-time' and msg.type == 'tpdu':
+            tpdu_prefix = tpdu_atr_time_prefix(msg.timestamp - self._atr_start)
+        if msg.type == 'atr':
+            self._atr_start = msg.timestamp
+        line = format_message(msg, tpdu_prefix=tpdu_prefix)
         self._f.write(line + '\n')
 
     def close(self):

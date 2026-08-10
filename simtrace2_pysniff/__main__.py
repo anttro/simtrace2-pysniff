@@ -17,6 +17,7 @@ from . import (
     format_message,
     __version__,
 )
+from .dump import tpdu_timestamp_prefix, tpdu_atr_time_prefix
 from .gsmtap import build_gsmtap_packet, GSMTAP_SIM_ATR, GSMTAP_SIM_APDU
 
 
@@ -48,6 +49,9 @@ def build_parser():
                    help='Write hex dump to file')
     p.add_argument('--no-stdout', action='store_true',
                    help='Suppress hex dump to stdout')
+    p.add_argument('--format', '-f', choices=['hex', 'timestamp', 'atr-time'],
+                   default='hex',
+                   help='Output format for TPDU lines (default: hex)')
     p.add_argument('--vendor', type=lambda x: int(x, 16),
                    default=0x1d50, metavar='HEX',
                    help='USB vendor ID (default: 0x1d50)')
@@ -99,7 +103,7 @@ def main():
 
     file_dumper = None
     if args.output:
-        file_dumper = FileDumper(args.output)
+        file_dumper = FileDumper(args.output, fmt=args.format)
         print(f'File output: {args.output}', file=sys.stderr)
 
     session = SniffSession(
@@ -130,10 +134,22 @@ def main():
     signal.signal(signal.SIGINT, on_signal)
     signal.signal(signal.SIGTERM, on_signal)
 
+    atr_time_start = time.monotonic()
+
     try:
         for msg in session.iter_messages():
+            if msg.type == 'atr':
+                atr_time_start = msg.timestamp
+
+            tpdu_prefix = ''
+            if args.format == 'timestamp' and msg.type == 'tpdu':
+                tpdu_prefix = tpdu_timestamp_prefix(msg)
+            elif args.format == 'atr-time' and msg.type == 'tpdu':
+                tpdu_prefix = tpdu_atr_time_prefix(
+                    msg.timestamp - atr_time_start)
+
             if not args.no_stdout:
-                print(format_message(msg))
+                print(format_message(msg, tpdu_prefix=tpdu_prefix))
 
             if file_dumper is not None:
                 file_dumper.write(msg)

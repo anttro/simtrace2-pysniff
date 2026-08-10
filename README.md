@@ -17,6 +17,8 @@ Or use the bundled startup script:
 
 ```sh
 ./sniff-start.sh                                 # hex dump to stdout
+./sniff-start.sh --format timestamp              # TPDU lines with local time
+./sniff-start.sh --format atr-time               # TPDU lines relative to ATR
 ./sniff-start.sh --gsmtap 127.0.0.1:4729         # + Wireshark GSMTAP
 ./sniff-start.sh --pcap trace.pcap               # save PCAP for later
 ./sniff-start.sh --inactivity-timeout 30         # reconnect on silence
@@ -58,6 +60,10 @@ After that, `python -m simtrace2_pysniff` works identically to Linux.
 ```
 python -m simtrace2_pysniff [OPTIONS]
 
+  --format, -f FORMAT       Output format (default: hex)
+                            hex       — plain hex dump
+                            timestamp — TPDU lines prefixed with [HH:MM:SS.mmm]
+                            atr-time  — TPDU lines prefixed with [SSSS.mmm] from last ATR
   --gsmtap HOST[:PORT]      Send ATR/TPDU as GSMTAP over UDP (default port 4729)
   --pcap FILE               Write sniffed data to PCAP file for Wireshark
   --output, -o FILE         Write hex dump to file
@@ -80,9 +86,14 @@ for msg in session.iter_messages():
     print(f"{msg.type}: {msg.data.hex()}")
 ```
 
-## Output
+## Output Formats
 
-- **stdout**: `ATR: 3b 9e ...`, `TPDU: a0 a4 00 00 02 3f 00`, `Card state change: reset de-asserted`
+- **`hex`** (default): plain hex dump — `ATR: 3b 9e ...`, `TPDU: a0 a4 00 00 02 3f 00`
+- **`timestamp`**: TPDU lines prefixed with local time — `[14:32:05.123] TPDU: a0 a4 00 00 02 3f 00`
+- **`atr-time`**: TPDU lines prefixed with seconds since last ATR — `[0001.234] TPDU: a0 a4 00 00 02 3f 00`
+
+Non-TPDU messages (ATR, PPS, card state changes, Fi/Di) print identically in all formats.
+
 - **GSMTAP**: ATR (subtype 1) and TPDU (subtype 2) over UDP to Wireshark
 - **PCAP**: all messages as GSMTAP-encapsulated packets (LINKTYPE 155), openable in Wireshark
 

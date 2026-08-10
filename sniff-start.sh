@@ -1,7 +1,7 @@
 #!/bin/bash
 # simtrace2-pysniff startup script
 #
-# Usage: ./sniff-start.sh [--gsmtap HOST[:PORT]] [--pcap FILE] [--output FILE] [--inactivity-timeout SECONDS]
+# Usage: ./sniff-start.sh [--format FORMAT] [--gsmtap HOST[:PORT]] [--pcap FILE] [--output FILE] [--inactivity-timeout SECONDS]
 #
 # Options set via environment variables act as defaults; CLI flags override them.
 
@@ -13,6 +13,7 @@ PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
 GSMTAP="${GSMTAP:-}"
 PCAP="${PCAP:-}"
 OUTPUT="${OUTPUT:-}"
+FORMAT="${FORMAT:-}"
 INACTIVITY_TIMEOUT="${INACTIVITY_TIMEOUT:-0}"
 
 while [[ $# -gt 0 ]]; do
@@ -20,6 +21,7 @@ while [[ $# -gt 0 ]]; do
         --gsmtap)              GSMTAP="$2"; shift 2 ;;
         --pcap)                PCAP="$2"; shift 2 ;;
         --output|-o)           OUTPUT="$2"; shift 2 ;;
+        --format|-f)           FORMAT="$2"; shift 2 ;;
         --inactivity-timeout)  INACTIVITY_TIMEOUT="$2"; shift 2 ;;
         --keep-running|--no-reconnect)
                                EXTRA_ARGS+=("$1"); shift ;;
@@ -76,6 +78,7 @@ ARGS=()
 [[ -n "$GSMTAP" ]]             && ARGS+=(--gsmtap "$GSMTAP")
 [[ -n "$PCAP" ]]               && ARGS+=(--pcap "$PCAP")
 [[ -n "$OUTPUT" ]]             && ARGS+=(--output "$OUTPUT")
+[[ -n "$FORMAT" ]]             && ARGS+=(--format "$FORMAT")
 [[ "$INACTIVITY_TIMEOUT" != "0" ]] && ARGS+=(--inactivity-timeout "$INACTIVITY_TIMEOUT")
 ARGS+=("${EXTRA_ARGS[@]}")
 
