@@ -131,7 +131,10 @@ Non-TPDU messages (ATR, PPS, card state changes, Fi/Di) print identically in all
 
 ## Background / Daemon
 
-SIGHUP is ignored by default — terminal closure won't kill the sniffer.
+SIGHUP is automatically ignored when stdin is not a terminal (i.e. run in
+background or via a pipe). Foreground terminal sessions still respond to
+SIGHUP normally.
+
 To run persistently in the background with output to files:
 
 ```sh

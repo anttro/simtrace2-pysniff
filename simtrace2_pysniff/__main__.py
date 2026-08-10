@@ -131,7 +131,8 @@ def main():
             file_dumper.close()
         sys.exit(0)
 
-    signal.signal(signal.SIGHUP, signal.SIG_IGN)
+    if not sys.stdin.isatty():
+        signal.signal(signal.SIGHUP, signal.SIG_IGN)
     signal.signal(signal.SIGINT, on_signal)
     signal.signal(signal.SIGTERM, on_signal)
 
