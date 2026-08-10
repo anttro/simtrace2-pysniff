@@ -129,6 +129,17 @@ Non-TPDU messages (ATR, PPS, card state changes, Fi/Di) print identically in all
 - **GSMTAP**: ATR (subtype 1) and TPDU (subtype 2) over UDP to Wireshark
 - **PCAP**: all messages as GSMTAP-encapsulated packets (LINKTYPE 155), openable in Wireshark
 
+## Background / Daemon
+
+SIGHUP is ignored by default — terminal closure won't kill the sniffer.
+To run persistently in the background with output to files:
+
+```sh
+nohup ./sniff-start.sh --output /tmp/sniff.log &> /tmp/sniff-err.log &
+# or
+FORMAT=timestamp nohup python -m simtrace2_pysniff --output /tmp/sniff.log &> /tmp/sniff-err.log &
+```
+
 ## Library Usage
 
 ```python
