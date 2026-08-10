@@ -1,31 +1,73 @@
 # simtrace2-pysniff
 
 Python-based replacement for `simtrace2-sniff` — SIM card communication sniffer
-for Osmocom SIMtrace2 hardware (firmware in trace mode).
+for Osmocom SIMtrace2 hardware (firmware in **trace** mode).
 
 **Single dependency**: PyUSB (libusb wrapper). No libosmocore, no libosmosim.
 
-## Quick Start
+## Prerequisites
+
+- **Python 3.9+**
+- **PyUSB** — `pip install pyusb`
+- **libusb** — system library, present by default on Linux; on Windows the
+  SIMtrace2 driver must be swapped (see [USB Device Access](#usb-device-access))
+- **SIMtrace2 hardware** running firmware in *trace* mode
+  (VID `1d50`, PID `60e3`, USB class `ff`, subclass `01`). For building and
+  flashing trace firmware, see the [upstream SIMtrace2 project](https://gitea.osmocom.org/sim-card/simtrace2).
+
+No other dependencies. PCAP, GSMTAP, and hex dump output use only Python stdlib.
+
+## Install
 
 ```sh
-# Install + run
+git clone https://github.com/anttro/simtrace2-pysniff.git
+cd simtrace2-pysniff
 pip install pyusb
-python -m simtrace2_pysniff
 ```
 
-Or use the bundled startup script:
+Or install the package into your environment:
 
 ```sh
-./sniff-start.sh                                 # hex dump to stdout
-./sniff-start.sh --format timestamp              # TPDU lines with local time
-./sniff-start.sh --format atr-time               # TPDU lines relative to ATR
-./sniff-start.sh --gsmtap 127.0.0.1:4729         # + Wireshark GSMTAP
-./sniff-start.sh --pcap trace.pcap               # save PCAP for later
-./sniff-start.sh --inactivity-timeout 30         # reconnect on silence
+pip install -e .
+# then run: simtrace2-pysniff [opts]
 ```
 
-The startup script performs a pre-flight USB permission check and prints
-install instructions if the udev rule is missing (see below).
+## Running
+
+Two equivalent ways to start the sniffer:
+
+### Startup script (Linux only)
+
+`./sniff-start.sh` performs a pre-flight USB permission check (prints udev
+install instructions if the SIMtrace2 device is not writable) and then
+launches the Python module.
+
+```sh
+./sniff-start.sh
+./sniff-start.sh --format timestamp
+./sniff-start.sh --gsmtap 127.0.0.1:4729
+./sniff-start.sh --pcap trace.pcap --format atr-time
+```
+
+Options can also be set via environment variables:
+
+```sh
+FORMAT=timestamp GSMTAP=127.0.0.1 ./sniff-start.sh
+```
+
+### Python module (cross-platform)
+
+```sh
+python -m simtrace2_pysniff
+python -m simtrace2_pysniff --format timestamp --gsmtap 127.0.0.1:4729
+python -m simtrace2_pysniff --pcap trace.pcap
+```
+
+If installed via `pip install -e .`, use the console script directly:
+
+```sh
+simtrace2-pysniff --format atr-time
+```
 
 ## USB Device Access
 
@@ -76,16 +118,6 @@ Recovery options:
   --inactivity-timeout SEC  Reconnect after N seconds of silence (default: disabled)
 ```
 
-## Library Usage
-
-```python
-from simtrace2_pysniff import SniffSession
-
-session = SniffSession(inactivity_timeout=30.0)
-for msg in session.iter_messages():
-    print(f"{msg.type}: {msg.data.hex()}")
-```
-
 ## Output Formats
 
 - **`hex`** (default): plain hex dump — `ATR: 3b 9e ...`, `TPDU: a0 a4 00 00 02 3f 00`
@@ -96,6 +128,16 @@ Non-TPDU messages (ATR, PPS, card state changes, Fi/Di) print identically in all
 
 - **GSMTAP**: ATR (subtype 1) and TPDU (subtype 2) over UDP to Wireshark
 - **PCAP**: all messages as GSMTAP-encapsulated packets (LINKTYPE 155), openable in Wireshark
+
+## Library Usage
+
+```python
+from simtrace2_pysniff import SniffSession
+
+session = SniffSession(inactivity_timeout=30.0)
+for msg in session.iter_messages():
+    print(f"{msg.type}: {msg.data.hex()}")
+```
 
 ## Recovery
 
