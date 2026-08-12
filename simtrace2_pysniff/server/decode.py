@@ -732,6 +732,283 @@ def _decode_response_for(ins, data):
     return None
 
 
+# ──────────────────── Command-body decoders ────────────────────
+
+AUTH_CONTEXTS = {
+    0: 'GSM',
+    1: '3G (UMTS)',
+    2: 'VGC/VBS',
+    4: 'GBA',
+}
+
+
+def _decode_auth_cmd(data, p2):
+    """Decode an AUTHENTICATE command body (RAND / RAND+AUTN)."""
+    ctx = p2 & 0x07
+    result = {'context': AUTH_CONTEXTS.get(ctx, f'unknown ({ctx})')}
+    if ctx in (0, 1) and data:
+        i = 0
+        if i < len(data):
+            rlen = data[i]
+            i += 1
+            result['rand'] = data[i:i + rlen].hex().upper()
+            i += rlen
+        if ctx == 1 and i < len(data):  # 3G → AUTN
+            alen = data[i]
+            i += 1
+            result['autn'] = data[i:i + alen].hex().upper()
+    return result
+
+
+# TS 102 223 §8.25 — Event list values
+EVENT_TYPES = {
+    0x00: 'MT call', 0x01: 'Call connected', 0x02: 'Call disconnected',
+    0x03: 'Location status', 0x04: 'User activity', 0x05: 'Idle screen available',
+    0x06: 'Card reader status', 0x07: 'Language selection',
+    0x08: 'Browser termination', 0x09: 'Data available',
+    0x0A: 'Channel status', 0x0B: 'Access Technology Change',
+    0x0C: 'Display parameters changed', 0x0D: 'Local connection',
+    0x0E: 'Network Search Mode Change', 0x0F: 'Browsing status',
+    0x10: 'Frames Information Change', 0x11: 'I-WLAN Access Status',
+    0x12: 'Network Rejection', 0x13: 'HCI Connectivity',
+    0x14: 'Change of UICC Access', 0x15: 'CSG Cell Change',
+    0x16: 'Contactless state request', 0x17: 'Profile Container',
+    0x18: 'LTE D2D Discovery Monitoring', 0x19: 'LTE D2D Communication Monitoring',
+    0x1A: 'LTE D2D Announcement Response', 0x1B: 'LTE D2D Revocation',
+    0x1C: 'LTE D2D Application Port', 0x1D: 'LTE D2D Security Recovery',
+    0x1E: 'Off-net Emergency Call', 0x1F: 'ECall Over IMS',
+    0x20: 'EARFCN Update', 0x21: 'SCEF Channel Status',
+}
+
+LOCATION_STATUS = {
+    0x00: 'Normal service',
+    0x01: 'Limited service',
+    0x02: 'No service',
+}
+
+
+def _decode_bcd_address(data):
+    """Decode a [TON/NPI + BCD digits] address into a string."""
+    if not data:
+        return ''
+    ton = (data[0] >> 4) & 0x07  # bits 6-4 (bit 7 is the extension bit)
+    digits = []
+    for b in data[1:]:
+        lo, hi = b & 0x0F, (b >> 4) & 0x0F
+        if lo <= 9:
+            digits.append(str(lo))
+        elif lo == 0x0F:
+            break
+        if hi <= 9:
+            digits.append(str(hi))
+        elif hi == 0x0F:
+            break
+    num = ''.join(digits)
+    if ton == 1:  # international
+        num = '+' + num
+    return num
+
+
+# TS 23.038 — GSM 7-bit default alphabet
+GSM7_ALPHABET = (
+    '@\u00a3$\u00a5\u00e8\u00e9\u00f9\u00ec\u00f2\u00c7\n\u00d8\u00f8\r\u00c5\u00e5'
+    '\u0394_\u03a6\u0393\u039b\u03a9\u03a0\u03a8\u03a3\u0398\u039e\u001b\u00c6\u00e6\u00df\u00c9'
+    ' !"#\u00a4%&\'()*+,-./'
+    '0123456789:;<=>?'
+    '\u00a1ABCDEFGHIJKLMNO'
+    'PQRSTUVWXYZ\u00c4\u00d6\u00d1\u00dc\u00a7'
+    '\u00bfabcdefghijklmno'
+    'pqrstuvwxyz\u00e4\u00f6\u00f1\u00fc\u00e0'
+)
+
+GSM7_EXTENSION = {
+    0x0A: '\n', 0x14: '^', 0x28: '{', 0x29: '}', 0x2F: '\\',
+    0x3C: '[', 0x3D: '~', 0x3E: ']', 0x40: '|', 0x65: '\u20ac',
+}
+
+
+def _decode_gsm7(data, num_chars):
+    """Unpack GSM 7-bit packed septets and decode to text."""
+    septets = []
+    bitbuf = 0
+    bitcount = 0
+    for byte in data:
+        bitbuf |= byte << bitcount
+        bitcount += 8
+        while bitcount >= 7:
+            septets.append(bitbuf & 0x7F)
+            bitbuf >>= 7
+            bitcount -= 7
+    if num_chars is not None:
+        septets = septets[:num_chars]
+    text = []
+    i = 0
+    while i < len(septets):
+        s = septets[i]
+        if s == 0x1B and i + 1 < len(septets):
+            text.append(GSM7_EXTENSION.get(septets[i + 1], ' '))
+            i += 2
+        else:
+            text.append(GSM7_ALPHABET[s] if s < len(GSM7_ALPHABET) else '?')
+            i += 1
+    return ''.join(text)
+
+
+def _decode_dcs(dcs):
+    """Decode TP-DCS into (encoding, message_class).
+
+    Alphabet is selected by DCS bits 3-2: 0=GSM 7-bit, 1=8-bit data, 2=UCS2.
+    """
+    group = dcs & 0xC0
+    if group in (0x00, 0xC0):
+        alpha = (dcs >> 2) & 0x03
+        encoding = {0: 'GSM 7-bit', 1: '8-bit data', 2: 'UCS2'}.get(alpha, 'reserved')
+    else:
+        encoding = '8-bit data'
+    return encoding, (dcs & 0x03)
+
+
+def _decode_sm_tpdu(data):
+    """Decode a GSM 03.40 (TS 23.040) SM TPDU (SMS-DELIVER / SMS-SUBMIT)."""
+    if not data:
+        return {}
+    mti = data[0] & 0x03
+    mti_names = {0: 'SMS-DELIVER', 1: 'SMS-SUBMIT', 2: 'SMS-STATUS-REPORT', 3: 'SMS-COMMAND'}
+    udhi = bool(data[0] & 0x40)
+    result = {'mti': mti_names.get(mti, f'unknown ({mti})'), 'udhi': udhi}
+
+    if mti == 0:  # SMS-DELIVER
+        i = 1
+        if i < len(data):
+            oa_len = data[i]
+            i += 1
+            oa_bytes = 1 + (oa_len + 1) // 2  # TON/NPI + BCD digits
+            result['oa'] = _decode_bcd_address(data[i:i + oa_bytes])
+            i += oa_bytes
+        if i + 1 < len(data):
+            result['pid'] = data[i]
+            result['dcs'] = data[i + 1]
+            i += 2
+        i += 7  # TP-SCTS (service centre time stamp)
+        if i < len(data):
+            udl = data[i]
+            i += 1
+            result = _decode_ud(data[i:], udl, result.get('dcs', 0), udhi, result)
+    elif mti == 1:  # SMS-SUBMIT
+        vpf = (data[0] >> 3) & 0x03
+        i = 1
+        if i < len(data):
+            result['mr'] = data[i]  # TP-MR
+            i += 1
+        if i < len(data):
+            da_len = data[i]
+            i += 1
+            da_bytes = 1 + (da_len + 1) // 2
+            result['da'] = _decode_bcd_address(data[i:i + da_bytes])
+            i += da_bytes
+        if i + 1 < len(data):
+            result['pid'] = data[i]
+            result['dcs'] = data[i + 1]
+            i += 2
+        if vpf in (1, 3):  # 1-octet validity period
+            i += 1
+        elif vpf == 2:  # 7-octet relative validity period
+            i += 7
+        if i < len(data):
+            udl = data[i]
+            i += 1
+            result = _decode_ud(data[i:], udl, result.get('dcs', 0), udhi, result)
+
+    return result
+
+
+def _decode_ud(ud, udl, dcs, udhi, result):
+    encoding, msg_class = _decode_dcs(dcs)
+    result['encoding'] = encoding
+    result['msg_class'] = msg_class
+
+    pid = result.get('pid')
+    if pid == 0x7F:  # SIM data download → secured packet (show hex)
+        result['pid_name'] = 'SIM data download (secured packet)'
+        result['payload'] = ud[:udl].hex().upper()
+        return result
+
+    if udhi and ud:
+        udhl = ud[0]
+        result['udh'] = ud[1:1 + udhl].hex().upper()
+        body = ud[1 + udhl:]
+        if encoding == 'GSM 7-bit':
+            fill_bits = (udhl + 1) * 8
+            n = udl - ((fill_bits + 6) // 7)
+            result['text'] = _decode_gsm7(body, n)
+        elif encoding == 'UCS2':
+            result['text'] = body[:udl].decode('utf-16-be', errors='replace')
+        else:
+            result['payload'] = body[:udl].hex().upper()
+    else:
+        if encoding == 'GSM 7-bit':
+            result['text'] = _decode_gsm7(ud, udl)
+        elif encoding == 'UCS2':
+            result['text'] = ud[:udl].decode('utf-16-be', errors='replace')
+        else:
+            result['payload'] = ud[:udl].hex().upper()
+
+    return result
+
+
+def _decode_envelope(body):
+    """Decode an ENVELOPE command body (TS 102 223 / TS 31.111)."""
+    tlvs = parse_tlv(body)
+    if not tlvs:
+        return {}
+    tag, _length, value = tlvs[0]
+    result = {'type': ENVELOPE_TYPES.get(tag, f'0x{tag:02X}')}
+    inner = parse_tlv(value)
+
+    if tag == 0xD6:  # EVENT DOWNLOAD
+        for t, _l, v in inner:
+            if t == 0x19:  # Event list
+                result['events'] = [EVENT_TYPES.get(e, f'0x{e:02X}') for e in v]
+            elif t == 0x1B:  # Location status
+                if v:
+                    result['location_status'] = LOCATION_STATUS.get(v[0], f'0x{v[0]:02X}')
+            elif t == 0x13:  # Location information
+                result['location_info'] = v.hex().upper()
+            elif t == 0x02:  # Device identities
+                result['device_ids'] = v.hex().upper()
+    elif tag == 0xD5:  # MO SHORT MESSAGE CONTROL
+        for t, _l, v in inner:
+            if t == 0x06:  # Address objects
+                if 'smsc' not in result:
+                    result['smsc'] = _decode_bcd_address(v)
+                else:
+                    result['tp_da'] = _decode_bcd_address(v)
+            elif t == 0x13:
+                result['location_info'] = v.hex().upper()
+            elif t == 0x02:
+                result['device_ids'] = v.hex().upper()
+    elif tag == 0xD1:  # SMS-PP DOWNLOAD
+        for t, _l, v in inner:
+            if t == 0x06:
+                result['smsc'] = _decode_bcd_address(v)
+            elif t == 0x86:  # SMS TPDU (SMS-DELIVER)
+                result['tpdu'] = _decode_sm_tpdu(v)
+            elif t == 0x02:
+                result['device_ids'] = v.hex().upper()
+    elif tag == 0xD2:  # CELL BROADCAST DOWNLOAD (structure only)
+        for t, _l, v in inner:
+            if t == 0x02:
+                result['device_ids'] = v.hex().upper()
+            else:
+                result[f'tag_{t:02X}'] = v.hex().upper()
+    else:  # D3 / D4 / D7 — device identities only
+        for t, _l, v in inner:
+            if t == 0x02:
+                result['device_ids'] = v.hex().upper()
+
+    return result
+
+
 # ──────────────────── Decode entry point ────────────────────
 
 def decode_message(raw_data, prev=None):
@@ -812,6 +1089,10 @@ def decode_message(raw_data, prev=None):
             cat_command = decode_cat(ins, body)
             if cat_command:
                 result['cat_command'] = cat_command
+            if ins in (0x88, 0x89):  # AUTHENTICATE command body
+                result['cmd'] = _decode_auth_cmd(body, p2)
+            elif ins == 0xC2:  # ENVELOPE command body
+                result['cmd'] = _decode_envelope(body)
 
     # SW
     if sw_bytes:

@@ -249,5 +249,103 @@ class TestTrResult(unittest.TestCase):
         self.assertEqual(r['name'], 'Proactive UICC session terminated by the user')
 
 
+class TestAuthCommand(unittest.TestCase):
+    def test_3g_rand_autn(self):
+        r = decode_message(bytes.fromhex(
+            '0088008122104A75BA425D438C549EF35BA5E3DD53051065E04D80E4DC8000A5C7FD842F41395E6135'))
+        cmd = r['cmd']
+        self.assertEqual(cmd['context'], '3G (UMTS)')
+        self.assertEqual(cmd['rand'], '4A75BA425D438C549EF35BA5E3DD5305')
+        self.assertEqual(cmd['autn'], '65E04D80E4DC8000A5C7FD842F41395E')
+
+    def test_gsm_rand_only(self):
+        from simtrace2_pysniff.server.decode import _decode_auth_cmd
+        r = _decode_auth_cmd(bytes.fromhex('10' + '00' * 16), 0x00)
+        self.assertEqual(r['context'], 'GSM')
+        self.assertEqual(r['rand'], '00' * 16)
+        self.assertNotIn('autn', r)
+
+
+class TestEventDownload(unittest.TestCase):
+    def test_location_status(self):
+        r = decode_message(bytes.fromhex(
+            '80C2000017D615190103020282811B0100130952F0991EC57A43C09F9000'))
+        cmd = r['cmd']
+        self.assertEqual(cmd['type'], 'EVENT DOWNLOAD')
+        self.assertEqual(cmd['events'], ['Location status'])
+        self.assertEqual(cmd['location_status'], 'Normal service')
+
+    def test_event_no_service(self):
+        r = decode_message(bytes.fromhex(
+            '80C200000CD60A190103020282811B01029000'))
+        self.assertEqual(r['cmd']['events'], ['Location status'])
+        self.assertEqual(r['cmd']['location_status'], 'No service')
+
+
+class TestSmTpdu(unittest.TestCase):
+    def _bcd(self, number):
+        d = [int(c) for c in number]
+        out = bytearray()
+        for i in range(0, len(d), 2):
+            lo = d[i]
+            hi = d[i + 1] if i + 1 < len(d) else 0xF
+            out.append((hi << 4) | lo)
+        return bytes(out)
+
+    def test_deliver_gsm7(self):
+        from simtrace2_pysniff.server.decode import _decode_sm_tpdu
+        oa = b'\x91' + self._bcd('79031234567')
+        tpdu = (b'\x00' + bytes([11]) + oa + b'\x00\x00' + b'\x00' * 7 +
+                b'\x05' + bytes.fromhex('E8329BFD06'))
+        r = _decode_sm_tpdu(tpdu)
+        self.assertEqual(r['mti'], 'SMS-DELIVER')
+        self.assertEqual(r['oa'], '+79031234567')
+        self.assertEqual(r['encoding'], 'GSM 7-bit')
+        self.assertEqual(r['text'], 'hello')
+
+    def test_deliver_ucs2(self):
+        from simtrace2_pysniff.server.decode import _decode_sm_tpdu
+        oa = b'\x91' + self._bcd('79031234567')
+        ucs2 = '\u041f\u0440\u0438\u0432\u0435\u0442'.encode('utf-16-be')
+        tpdu = (b'\x00' + bytes([11]) + oa + b'\x00\x08' + b'\x00' * 7 +
+                bytes([len(ucs2)]) + ucs2)
+        r = _decode_sm_tpdu(tpdu)
+        self.assertEqual(r['encoding'], 'UCS2')
+        self.assertEqual(r['text'], '\u041f\u0440\u0438\u0432\u0435\u0442')
+
+    def test_8bit_no_text(self):
+        from simtrace2_pysniff.server.decode import _decode_sm_tpdu
+        oa = b'\x91' + self._bcd('79031234567')
+        tpdu = (b'\x00' + bytes([11]) + oa + b'\x00\x04' + b'\x00' * 7 +
+                b'\x10' + bytes(range(16)))
+        r = _decode_sm_tpdu(tpdu)
+        self.assertEqual(r['encoding'], '8-bit data')
+        self.assertNotIn('text', r)
+        self.assertEqual(r['payload'], '000102030405060708090A0B0C0D0E0F')
+
+    def test_sim_data_download(self):
+        from simtrace2_pysniff.server.decode import _decode_sm_tpdu
+        oa = b'\x91' + self._bcd('79031234567')
+        tpdu = (b'\x00' + bytes([11]) + oa + b'\x7f\x04' + b'\x00' * 7 +
+                b'\x10' + bytes(range(16)))
+        r = _decode_sm_tpdu(tpdu)
+        self.assertEqual(r['pid_name'], 'SIM data download (secured packet)')
+        self.assertEqual(r['payload'], '000102030405060708090A0B0C0D0E0F')
+
+
+class TestBcdAddress(unittest.TestCase):
+    def test_international(self):
+        from simtrace2_pysniff.server.decode import _decode_bcd_address
+        self.assertEqual(_decode_bcd_address(bytes.fromhex('912143658709')), '+1234567890')
+
+    def test_national(self):
+        from simtrace2_pysniff.server.decode import _decode_bcd_address
+        self.assertEqual(_decode_bcd_address(bytes.fromhex('A12143658709')), '1234567890')
+
+    def test_odd_digits(self):
+        from simtrace2_pysniff.server.decode import _decode_bcd_address
+        self.assertEqual(_decode_bcd_address(bytes.fromhex('9121436587F9')), '+123456789')
+
+
 if __name__ == '__main__':
     unittest.main()
