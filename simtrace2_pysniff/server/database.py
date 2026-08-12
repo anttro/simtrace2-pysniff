@@ -167,11 +167,16 @@ class Database:
         return [{'type': r[0], 'count': r[1]} for r in rows]
 
     def _row_to_message(self, row):
-        return {
+        data_blob = row[4]
+        msg = {
             'id': row[0],
             'session_id': row[1],
             'elapsed': row[2],
             'type': row[3],
-            'data': row[4].hex(),
+            'data': data_blob.hex(),
             'flags': row[5],
         }
+        if row[3] == 'tpdu' and data_blob:
+            from .decode import decode_message
+            msg['decoded'] = decode_message(data_blob)
+        return msg
