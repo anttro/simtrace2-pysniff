@@ -85,6 +85,12 @@ def _parse_change(payload):
     consumed = 4
     return consumed, flags, b''
 
+
+def _parse_fidi(payload):
+    if len(payload) < 1:
+        return None
+    return 1, 0, payload[:1]
+
 _SNIFF_DATA_FMT = '<IH'
 _SNIFF_DATA_HDR_SIZE = struct.calcsize(_SNIFF_DATA_FMT)  # 6 bytes
 
@@ -102,7 +108,7 @@ def _parse_data(payload):
 
 _PAYLOAD_PARSERS = {
     SIMTRACE_MSGT_SNIFF_CHANGE: _parse_change,
-    SIMTRACE_MSGT_SNIFF_FIDI:   _parse_change,
+    SIMTRACE_MSGT_SNIFF_FIDI:   _parse_fidi,
     SIMTRACE_MSGT_SNIFF_ATR:    _parse_data,
     SIMTRACE_MSGT_SNIFF_PPS:    _parse_data,
     SIMTRACE_MSGT_SNIFF_TPDU:   _parse_data,

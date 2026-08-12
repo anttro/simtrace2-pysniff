@@ -24,7 +24,7 @@ class GsmtapListener:
             if sub_type is None:
                 continue
             msg_type = 'atr' if sub_type == GSMTAP_SIM_ATR else 'tpdu'
-            yield msg_type, data
+            yield msg_type, data, 0
 
 
 class DirectSniffer:
@@ -49,7 +49,7 @@ class DirectSniffer:
         for msg in self._session.iter_messages():
             if not self._running:
                 break
-            yield msg.type, msg.data
+            yield msg.type, msg.data, msg.flags
 
 
 class CaptureManager:
@@ -103,9 +103,9 @@ class CaptureManager:
         return sid
 
     def _capture_loop(self):
-        for msg_type, data in self._backend.iter_messages():
+        for msg_type, data, flags in self._backend.iter_messages():
             if self._session_id is None:
                 break
             elapsed = round(time.monotonic() - self._start_time, 3)
-            mid = self._db.insert_message(self._session_id, elapsed, msg_type, data)
+            mid = self._db.insert_message(self._session_id, elapsed, msg_type, data, flags)
             self._latest_msg_id = mid

@@ -92,5 +92,32 @@ class TestCommandTypeTables(unittest.TestCase):
         self.assertEqual(ENVELOPE_TYPES[0xD6], 'EVENT DOWNLOAD')
 
 
+class TestChangeAndFidiDecoding(unittest.TestCase):
+    def test_change_reset_assert(self):
+        r = decode_sniff_msg(b'', 'change', flags=1 << 2)
+        self.assertEqual(r['type'], 'change')
+        self.assertEqual(r['flags'], ['Reset asserted'])
+
+    def test_change_card_insert(self):
+        r = decode_sniff_msg(b'', 'change', flags=1 << 0)
+        self.assertEqual(r['flags'], ['Card inserted'])
+
+    def test_change_multiple_flags(self):
+        r = decode_sniff_msg(b'', 'change', flags=(1 << 2) | (1 << 3))
+        self.assertEqual(r['flags'], ['Reset asserted', 'Reset de-asserted'])
+
+    def test_change_no_flags(self):
+        r = decode_sniff_msg(b'', 'change', flags=0)
+        self.assertEqual(r['flags'], ['no changes'])
+
+    def test_fidi(self):
+        r = decode_sniff_msg(b'\x97', 'fidi')
+        self.assertEqual(r['type'], 'fidi')
+        self.assertEqual(r['fi'], 9)
+        self.assertEqual(r['di'], 7)
+        self.assertEqual(r['fi_val'], 512)
+        self.assertEqual(r['di_val'], 64)
+
+
 if __name__ == '__main__':
     unittest.main()

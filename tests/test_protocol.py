@@ -83,13 +83,14 @@ class TestParseMessage(unittest.TestCase):
         self.assertEqual(msg.flags, CHANGE_FLAG_TIMEOUT_WT)
 
     def test_fidi_message(self):
-        payload = struct.pack('<I', 0x97)  # Fi=9, Di=7
+        payload = b'\x97'  # Fi=9, Di=7
         buf = _build_hdr(SIMTRACE_MSGC_SNIFF, SIMTRACE_MSGT_SNIFF_FIDI,
                          payload=payload)
         msg, consumed = parse_message(buf)
         self.assertEqual(msg.type, 'fidi')
-        self.assertEqual(len(msg.data), 0)
-        self.assertEqual(msg.flags, 0x97)
+        self.assertEqual(len(msg.data), 1)
+        self.assertEqual(msg.data, b'\x97')
+        self.assertEqual(msg.flags, 0)
 
     def test_atr_message(self):
         atr = b'\x3b\x9e\x12\x34\x56\x78\x90'

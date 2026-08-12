@@ -590,12 +590,8 @@ CHANGE_FLAGS = {
 }
 
 
-def decode_change(raw_data):
-    """Decode a SIMtrace2 sniff_change payload (4-byte flags)."""
-    if len(raw_data) < 4:
-        return None
-    import struct
-    flags = struct.unpack('<I', raw_data[:4])[0]
+def decode_change(flags):
+    """Decode SIMtrace2 sniff_change flags into a list of human-readable names."""
     bits = []
     for mask, name in sorted(CHANGE_FLAGS.items()):
         if flags & mask:
@@ -628,7 +624,7 @@ def decode_fidi(raw_data):
     }
 
 
-def decode_sniff_msg(raw_data, msg_type):
+def decode_sniff_msg(raw_data, msg_type, flags=0):
     """Decode a raw sniff message of the given type.
 
     Returns a structured dict with at least a 'type' key, or None if
@@ -636,8 +632,8 @@ def decode_sniff_msg(raw_data, msg_type):
     """
     if msg_type == 'tpdu' and raw_data:
         return decode_message(raw_data)
-    if msg_type == 'change' and raw_data:
-        return decode_change(raw_data)
+    if msg_type == 'change':
+        return decode_change(flags)
     if msg_type == 'fidi' and raw_data:
         return decode_fidi(raw_data)
     if msg_type == 'atr':

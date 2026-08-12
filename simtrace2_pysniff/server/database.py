@@ -168,18 +168,19 @@ class Database:
 
     def _row_to_message(self, row):
         data_blob = row[4]
+        flags = row[5]
         msg = {
             'id': row[0],
             'session_id': row[1],
             'elapsed': row[2],
             'type': row[3],
             'data': data_blob.hex(),
-            'flags': row[5],
+            'flags': flags,
         }
-        if row[3] in ('tpdu', 'change', 'fidi', 'atr', 'pps') and data_blob:
+        if row[3] in ('tpdu', 'change', 'fidi', 'atr', 'pps'):
             try:
                 from .decode import decode_sniff_msg
-                msg['decoded'] = decode_sniff_msg(data_blob, row[3])
+                msg['decoded'] = decode_sniff_msg(data_blob, row[3], flags)
             except Exception as e:
                 import sys
                 print(f'Decode error for msg {row[0]} ({row[3]}, {len(data_blob)} bytes): {e}',

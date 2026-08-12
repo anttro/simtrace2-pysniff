@@ -6,3 +6,4 @@ dist/
 build/
 .venv/
 decode-errors.log
+auth-test.log
