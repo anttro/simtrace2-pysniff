@@ -59,3 +59,41 @@ class GsmtapSender:
 
     def close(self):
         self._sock.close()
+
+
+class GsmtapReceiver:
+    """Receive GSMTAP-SIM packets over UDP (compatible with simtrace2-sniff)."""
+
+    def __init__(self, bind_ip='127.0.0.1', bind_port=GSMTAP_UDP_PORT):
+        self._sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self._sock.bind((bind_ip, bind_port))
+        self._sock.settimeout(1.0)
+
+    def read_packet(self):
+        """Block until a GSMTAP-SIM packet arrives.
+
+        Returns ``(sub_type, data)`` on success or ``(None, None)``
+        on timeout.  *sub_type* is ``GSMTAP_SIM_ATR`` or ``GSMTAP_SIM_APDU``.
+        Raises ``ValueError`` for non-SIM or unknown GSMTAP packets.
+        """
+        try:
+            packet, addr = self._sock.recvfrom(65536)
+        except socket.timeout:
+            return None, None
+
+        if len(packet) < _GSMTAP_HDR_SIZE:
+            raise ValueError(f'GSMTAP packet too short: {len(packet)} bytes')
+
+        (version, hdr_len, pkt_type, _timeslot, _arfcn, _noise, _signal,
+         _frame, sub_type, _antenna, sub_slot, _res) = \
+            struct.unpack(_GSMTAP_HDR_FMT, packet[:_GSMTAP_HDR_SIZE])
+
+        if pkt_type != GSMTAP_TYPE_SIM:
+            raise ValueError(f'Not a GSMTAP SIM packet (type={pkt_type})')
+
+        data = packet[_GSMTAP_HDR_SIZE:]
+        return sub_type, data
+
+    def close(self):
+        self._sock.close()
