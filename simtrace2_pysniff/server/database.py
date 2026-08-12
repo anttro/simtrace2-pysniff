@@ -177,6 +177,11 @@ class Database:
             'flags': row[5],
         }
         if row[3] in ('tpdu', 'change', 'fidi', 'atr', 'pps') and data_blob:
-            from .decode import decode_sniff_msg
-            msg['decoded'] = decode_sniff_msg(data_blob, row[3])
+            try:
+                from .decode import decode_sniff_msg
+                msg['decoded'] = decode_sniff_msg(data_blob, row[3])
+            except Exception as e:
+                import sys
+                print(f'Decode error for msg {row[0]} ({row[3]}, {len(data_blob)} bytes): {e}',
+                      file=sys.stderr)
         return msg
