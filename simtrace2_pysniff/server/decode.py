@@ -267,12 +267,12 @@ APDU_SPEC = {
         'body': {'label': 'PUK + new PIN'},
     },
     0x88: {
-        'name': 'AUTHENTICATE (88)',
+        'name': 'AUTHENTICATE',
         'p1': {0x00: 'Run GSM algorithm', 0x80: 'Run 3G algo (resynchronisation)'},
         'body': {'label': 'Challenge/session key'},
     },
     0x89: {
-        'name': 'AUTHENTICATE (89)',
+        'name': 'AUTHENTICATE',
         'body': {'label': 'Response/resynchronisation data'},
     },
     0x84: {
@@ -390,6 +390,116 @@ APDU_SPEC = {
 }
 
 
+# ──────────────────── CAT (TS 102 223) command types ────────────────────
+
+CAT_COMMAND_TYPES = {
+    0x01: 'REFRESH',
+    0x02: 'MORE TIME',
+    0x03: 'POLL INTERVAL',
+    0x04: 'POLLING OFF',
+    0x05: 'SET UP EVENT LIST',
+    0x10: 'SET UP CALL',
+    0x11: 'SEND SS',
+    0x12: 'SEND USSD',
+    0x13: 'SEND SHORT MESSAGE',
+    0x14: 'SEND DTMF',
+    0x15: 'LAUNCH BROWSER',
+    0x16: 'GEOGRAPHICAL LOCATION REQUEST',
+    0x20: 'PLAY TONE',
+    0x21: 'DISPLAY TEXT',
+    0x22: 'GET INKEY',
+    0x23: 'GET INPUT',
+    0x24: 'SELECT ITEM',
+    0x25: 'SET UP MENU',
+    0x26: 'PROVIDE LOCAL INFORMATION',
+    0x27: 'TIMER MANAGEMENT',
+    0x28: 'SET UP IDLE MODE TEXT',
+    0x30: 'PERFORM CARD APDU',
+    0x31: 'POWER ON CARD',
+    0x32: 'POWER OFF CARD',
+    0x33: 'GET READER STATUS',
+    0x34: 'RUN AT COMMAND',
+    0x35: 'LANGUAGE NOTIFICATION',
+    0x40: 'OPEN CHANNEL',
+    0x41: 'CLOSE CHANNEL',
+    0x42: 'RECEIVE DATA',
+    0x43: 'SEND DATA',
+    0x44: 'GET CHANNEL STATUS',
+    0x45: 'SERVICE SEARCH',
+    0x46: 'GET SERVICE INFORMATION',
+    0x47: 'DECLARE SERVICE',
+    0x50: 'SET FRAMES',
+    0x51: 'GET FRAMES STATUS',
+    0x60: 'RETRIEVE MULTIMEDIA MESSAGE',
+    0x61: 'SUBMIT MULTIMEDIA MESSAGE',
+    0x62: 'DISPLAY MULTIMEDIA MESSAGE',
+    0x70: 'ACTIVATE',
+    0x71: 'CONTACTLESS STATE CHANGED',
+    0x72: 'COMMAND CONTAINER',
+    0x73: 'ENCAPSULATED SESSION CONTROL',
+    0x81: 'END OF PROACTIVE SESSION',
+}
+
+ENVELOPE_TYPES = {
+    0xD1: 'SMS-PP DOWNLOAD',
+    0xD2: 'CELL BROADCAST DOWNLOAD',
+    0xD3: 'MENU SELECTION',
+    0xD4: 'CALL CONTROL',
+    0xD5: 'MO SHORT MESSAGE CONTROL',
+    0xD6: 'EVENT DOWNLOAD',
+    0xD7: 'TIMER EXPIRATION',
+}
+
+
+def parse_tlv(data):
+    """Parse a BER-TLV structure into a list of (tag, length, value) tuples.
+
+    Handles single-byte tags and single-byte lengths (< 128), which cover
+    the CAT proactive command and ENVELOPE structures we decode.
+    """
+    tlvs = []
+    i = 0
+    n = len(data)
+    while i < n:
+        if i + 2 > n:
+            break
+        tag = data[i]
+        i += 1
+        length = data[i]
+        i += 1
+        if length & 0x80:
+            # long form length — not needed for top-level CAT decode
+            break
+        if i + length > n:
+            break
+        value = data[i:i + length]
+        i += length
+        tlvs.append((tag, length, value))
+    return tlvs
+
+
+def decode_cat(ins, body):
+    """Decode a CAT (TS 102 223) payload, returning the command/event name.
+
+    For FETCH (0x12) the body is a proactive UICC command (D0 TLV) whose
+    Command Details (tag 81) second byte is the Type of Command.
+    For ENVELOPE (0xC2) the first TLV tag is the envelope type.
+    Returns a string name or None.
+    """
+    if not body:
+        return None
+    if ins == 0x12:  # FETCH → proactive command
+        for tag, _length, value in parse_tlv(body):
+            if tag != 0xD0:
+                continue
+            for t2, _l2, v2 in parse_tlv(value):
+                if t2 == 0x81 and len(v2) >= 2:
+                    return CAT_COMMAND_TYPES.get(v2[1])
+    elif ins == 0xC2:  # ENVELOPE → envelope type
+        return ENVELOPE_TYPES.get(body[0])
+    return None
+
+
 # ──────────────────── Decode entry point ────────────────────
 
 def decode_message(raw_data):
@@ -457,6 +567,10 @@ def decode_message(raw_data):
             h = body.hex()
             if h in fids:
                 result['body']['note'] = fids[h]
+
+        cat_command = decode_cat(ins, body)
+        if cat_command:
+            result['cat_command'] = cat_command
 
     # SW
     if sw_bytes:
