@@ -66,11 +66,12 @@ class TestCatDecoding(unittest.TestCase):
         self.assertEqual(r['ins_name'], 'ENVELOPE')
         self.assertEqual(r['cat_command'], 'EVENT DOWNLOAD')
 
-    def test_tr_has_cat(self):
+    def test_tr_has_response_to(self):
         r = decode_message(bytes.fromhex(
             '801400000C8103010500020282810301009130'))
         self.assertEqual(r['ins_name'], 'TERMINAL RESPONSE')
-        self.assertEqual(r['cat_command'], 'SET UP EVENT LIST')
+        self.assertNotIn('cat_command', r)
+        self.assertEqual(r['response_to'], 'SET UP EVENT LIST')
 
     def test_select_no_cat(self):
         r = decode_message(bytes.fromhex('a0a40000023f009000'))
@@ -124,17 +125,17 @@ class TestTerminalResponse(unittest.TestCase):
         r = decode_message(bytes.fromhex(
             '801400000C8103010500020282810301009130'))
         self.assertEqual(r['ins_name'], 'TERMINAL RESPONSE')
-        self.assertEqual(r['cat_command'], 'SET UP EVENT LIST')
+        self.assertEqual(r['response_to'], 'SET UP EVENT LIST')
 
     def test_tr_setup_menu(self):
         r = decode_message(bytes.fromhex(
             '801400000C810301250002028281830100910F'))
-        self.assertEqual(r['cat_command'], 'SET UP MENU')
+        self.assertEqual(r['response_to'], 'SET UP MENU')
 
     def test_tr_poll_interval(self):
         r = decode_message(bytes.fromhex(
             '80140000108103010300020282810301000402011E9000'))
-        self.assertEqual(r['cat_command'], 'POLL INTERVAL')
+        self.assertEqual(r['response_to'], 'POLL INTERVAL')
 
 
 class TestGetResponseContext(unittest.TestCase):

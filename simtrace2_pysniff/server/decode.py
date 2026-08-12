@@ -497,10 +497,19 @@ def decode_cat(ins, body):
                     return CAT_COMMAND_TYPES.get(v2[1])
     elif ins == 0xC2:  # ENVELOPE → envelope type
         return ENVELOPE_TYPES.get(body[0])
-    elif ins == 0x14:  # TERMINAL RESPONSE → echoes proactive command type
-        for tag, _length, value in parse_tlv(body):
-            if tag == 0x81 and len(value) >= 2:
-                return CAT_COMMAND_TYPES.get(value[1])
+    return None
+
+
+def decode_tr_command(body):
+    """Extract the proactive command type echoed in a TERMINAL RESPONSE body.
+
+    Returns the CAT command name (context the TR is responding to), or None.
+    """
+    if not body:
+        return None
+    for tag, _length, value in parse_tlv(body):
+        if tag == 0x81 and len(value) >= 2:
+            return CAT_COMMAND_TYPES.get(value[1])
     return None
 
 
@@ -575,9 +584,14 @@ def decode_message(raw_data, prev=None):
             if h in fids:
                 result['body']['note'] = fids[h]
 
-        cat_command = decode_cat(ins, body)
-        if cat_command:
-            result['cat_command'] = cat_command
+        if ins == 0x14:
+            response_to = decode_tr_command(body)
+            if response_to:
+                result['response_to'] = response_to
+        else:
+            cat_command = decode_cat(ins, body)
+            if cat_command:
+                result['cat_command'] = cat_command
 
     # SW
     if sw_bytes:
