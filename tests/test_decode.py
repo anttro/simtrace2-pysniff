@@ -154,5 +154,75 @@ class TestGetResponseContext(unittest.TestCase):
         self.assertIsNone(r['response_for'])
 
 
+class TestFcpResponse(unittest.TestCase):
+    GET_RESPONSE = bytes.fromhex(
+        '00C000002962278202782183023F00A50A8001718302F9628701018A01058B032F0601C60990014083010183010A9000')
+
+    def test_select_response_fcp(self):
+        r = decode_message(self.GET_RESPONSE, prev={'ins': 0xA4, 'ins_name': 'SELECT', 'sw1': '61'})
+        self.assertEqual(r['response_for'], 'SELECT')
+        resp = r['response']
+        self.assertEqual(resp['template'], 'FCP')
+        self.assertEqual(resp['file_id'], '3F00')
+        self.assertEqual(resp['file_id_name'], 'MF')
+        self.assertEqual(resp['file_descriptor']['file_type'], 'DF or ADF')
+        self.assertEqual(resp['file_descriptor']['shareable'], 'shareable')
+        self.assertEqual(resp['life_cycle'], 'operational state (activated)')
+
+    def test_ef_descriptor_transparent(self):
+        from simtrace2_pysniff.server.decode import _decode_file_descriptor
+        fd = _decode_file_descriptor(bytes.fromhex('0121'))
+        self.assertEqual(fd['file_type'], 'Working EF')
+        self.assertEqual(fd['structure'], 'transparent')
+
+    def test_ef_descriptor_linear_fixed(self):
+        from simtrace2_pysniff.server.decode import _decode_file_descriptor
+        fd = _decode_file_descriptor(bytes.fromhex('0221'))
+        self.assertEqual(fd['file_type'], 'Working EF')
+        self.assertEqual(fd['structure'], 'linear fixed')
+
+
+class TestAuthResponse(unittest.TestCase):
+    def test_3g_success(self):
+        from simtrace2_pysniff.server.decode import _decode_auth
+        data = bytes.fromhex('DB084CFA9017FD0DD85A101A2622F60E8ABD2C2497B9A8EFAF55E510CAA393329FF97868B9537369D5266A4F084D417B05ABFAFAEE')
+        r = _decode_auth(data)
+        self.assertEqual(r['type'], '3G')
+        self.assertEqual(r['status'], 'success')
+        self.assertEqual(r['res'], '4CFA9017FD0DD85A')
+        self.assertEqual(r['ck'], '1A2622F60E8ABD2C2497B9A8EFAF55E5')
+        self.assertEqual(r['ik'], 'CAA393329FF97868B9537369D5266A4F')
+
+    def test_3g_sync_fail(self):
+        from simtrace2_pysniff.server.decode import _decode_auth
+        data = bytes.fromhex('DC0E' + '00' * 14)
+        r = _decode_auth(data)
+        self.assertEqual(r['type'], '3G')
+        self.assertEqual(r['status'], 'sync fail')
+        self.assertEqual(r['auts'], '00' * 14)
+
+    def test_gsm(self):
+        from simtrace2_pysniff.server.decode import _decode_auth
+        sres = bytes.fromhex('AABBCCDD')
+        kc = bytes.fromhex('0011223344556677')
+        r = _decode_auth(sres + kc)
+        self.assertEqual(r['type'], 'GSM')
+        self.assertEqual(r['sres'], 'AABBCCDD')
+        self.assertEqual(r['kc'], '0011223344556677')
+
+
+class TestTrResult(unittest.TestCase):
+    def test_success(self):
+        r = decode_message(bytes.fromhex('801400000C8103010500020282810301009130'))
+        self.assertEqual(r['response']['code'], '0x00')
+        self.assertEqual(r['response']['name'], 'Command performed successfully')
+
+    def test_session_terminated(self):
+        from simtrace2_pysniff.server.decode import _decode_tr_result
+        r = _decode_tr_result(bytes.fromhex('81030105000202828103010A'))
+        self.assertEqual(r['code'], '0x0A')
+        self.assertEqual(r['name'], 'Proactive UICC session terminated by the user')
+
+
 if __name__ == '__main__':
     unittest.main()

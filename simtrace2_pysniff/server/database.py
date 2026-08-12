@@ -202,7 +202,16 @@ class Database:
         d = decode_sniff_msg(row[0], 'tpdu', 0)
         if not d:
             return None
-        return {'ins_name': d.get('ins_name'), 'sw1': (d.get('sw') or {}).get('sw1')}
+        return self._context_from_decoded(d)
+
+    def _context_from_decoded(self, d):
+        ins_hex = d.get('ins_hex')
+        ins = int(ins_hex, 16) if ins_hex else None
+        return {
+            'ins': ins,
+            'ins_name': d.get('ins_name'),
+            'sw1': (d.get('sw') or {}).get('sw1'),
+        }
 
     def _decode_rows(self, rows, initial_prev=None):
         msgs = []
@@ -211,9 +220,6 @@ class Database:
             msg = self._row_to_message(row, prev=prev)
             d = msg.get('decoded')
             if msg['type'] == 'tpdu' and d and d.get('ins_hex'):
-                prev = {
-                    'ins_name': d.get('ins_name'),
-                    'sw1': (d.get('sw') or {}).get('sw1'),
-                }
+                prev = self._context_from_decoded(d)
             msgs.append(msg)
         return msgs

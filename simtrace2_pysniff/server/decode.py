@@ -513,6 +513,180 @@ def decode_tr_command(body):
     return None
 
 
+# ──────────────────── Response decoders ────────────────────
+
+# TS 102 223 Result (TERMINAL RESPONSE) — general result codes
+TR_RESULTS = {
+    0x00: 'Command performed successfully',
+    0x01: 'Command performed with partial comprehension',
+    0x02: 'Command performed, with missing information',
+    0x03: 'REFRESH performed with additional EFs read',
+    0x04: 'Command performed successfully, but requested icon could not be displayed',
+    0x05: 'Command performed, but modified by call control by NAA',
+    0x06: 'Command performed successfully, limited service',
+    0x07: 'Command performed with modification',
+    0x08: 'REFRESH performed but indicated NAA was not active',
+    0x09: 'Command performed successfully, tone not played',
+    0x0A: 'Proactive UICC session terminated by the user',
+    0x0B: 'Backward move in the proactive UICC session requested by the user',
+    0x0C: 'No response from user',
+    0x0D: 'Help information required by the user',
+    0x0E: 'USSD/SS transaction terminated by the user',
+    0x10: 'Terminal currently unable to process command (screen busy)',
+    0x11: 'Terminal currently unable to process command (busy on call)',
+    0x12: 'Terminal currently unable to process command (USSD/SS ongoing)',
+    0x13: 'Terminal currently unable to process command (no service)',
+    0x14: 'Terminal currently unable to process command (access control class bar)',
+    0x15: 'Terminal currently unable to process command (radio resource unavailable)',
+    0x20: 'Network currently unable to process command',
+    0x30: 'Beyond terminal capability',
+    0x31: 'Command type not understood by terminal',
+    0x32: 'Command data not understood by terminal',
+    0x33: 'Command number not known by terminal',
+    0x34: 'SS Return Error',
+    0x35: 'SMS RP-ERROR',
+    0x36: 'Error, required values are missing',
+    0x37: 'USSD Return Error',
+    0x38: 'MultipleCard commands error',
+    0x39: 'Interaction with CC by NAA, wrong procedure',
+    0x3C: 'Access Technology unable to process command',
+    0x3D: 'Frames error',
+    0x3E: 'MMS Error',
+}
+
+
+def _decode_tr_result(body):
+    """Decode the Result TLV of a TERMINAL RESPONSE body."""
+    for tag, _length, value in parse_tlv(body):
+        if tag in (0x03, 0x83) and value:
+            code = value[0]
+            return {
+                'code': f'0x{code:02X}',
+                'name': TR_RESULTS.get(code),
+                'raw': value.hex().upper(),
+            }
+    return None
+
+
+# TS 102 221 Table 11.5 — file descriptor byte
+_FILE_TYPES = {
+    0b000: 'Working EF',
+    0b001: 'Internal EF',
+    0b111: 'DF or ADF',
+}
+_EF_STRUCTURES = {
+    0b000: 'no information',
+    0b001: 'transparent',
+    0b010: 'linear fixed',
+    0b110: 'cyclic',
+}
+_LIFE_CYCLE = {
+    0x00: 'no information given',
+    0x01: 'creation state',
+    0x03: 'initialization state',
+    0x05: 'operational state (activated)',
+    0x07: 'operational state (deactivated)',
+    0x0C: 'termination state',
+    0x0D: 'termination state (permanently)',
+}
+
+
+def _decode_file_descriptor(value):
+    """Decode a file descriptor byte string (TS 102 221 Table 11.5)."""
+    if not value:
+        return {}
+    b = value[0]
+    ft = (b >> 3) & 0x07
+    result = {
+        'shareable': 'shareable' if (b & 0x40) else 'not shareable',
+        'file_type': _FILE_TYPES.get(ft, 'RFU'),
+    }
+    if ft in (0b000, 0b001):  # EF
+        result['structure'] = _EF_STRUCTURES.get(b & 0x07, 'RFU')
+        if len(value) >= 2:
+            result['data_coding'] = f'0x{value[1]:02X}'
+        if len(value) >= 4:
+            result['record_length'] = int.from_bytes(value[2:4], 'big')
+        if len(value) >= 5:
+            result['num_records'] = value[4]
+    elif len(value) >= 2:
+        result['num_dfs_efs'] = value[1]
+    return result
+
+
+def _decode_fcp(data):
+    """Decode an FCP/FCI/FMD template (TS 102 221 §11.1.1.3)."""
+    result = {}
+    for tag, _length, value in parse_tlv(data):
+        if tag in (0x62, 0x64):  # outer template — recurse
+            inner = _decode_fcp(value)
+            inner['template'] = 'FCP' if tag == 0x62 else 'FMD'
+            result.update(inner)
+        elif tag == 0x82:
+            result['file_descriptor'] = _decode_file_descriptor(value)
+        elif tag == 0x83:
+            fid = value.hex().upper()
+            result['file_id'] = fid
+            if fid.lower() in KNOWN_FIDS:
+                result['file_id_name'] = KNOWN_FIDS[fid.lower()]
+        elif tag == 0x84:
+            result['df_name'] = value.hex().upper()
+        elif tag == 0x88:
+            result['sfi'] = f'0x{value[0]:02X}' if value else None
+        elif tag == 0x8A:
+            result['life_cycle'] = _LIFE_CYCLE.get(value[0] if value else 0, f'0x{(value[0] if value else 0):02X}')
+        elif tag == 0xAB:
+            result['short_ef_id'] = value.hex().upper()
+    return result
+
+
+def _decode_auth_3g(data):
+    """Decode a 3G AUTHENTICATE response (tag DB success / DC sync-fail)."""
+    tag = data[0]
+    if tag == 0xDC:  # synchronisation failure → length byte + AUTS
+        if len(data) >= 2:
+            auts_len = data[1]
+            return {'type': '3G', 'status': 'sync fail',
+                    'auts': data[2:2 + auts_len].hex().upper()}
+        return {'type': '3G', 'status': 'sync fail', 'auts': data[1:].hex().upper()}
+    # tag 0xDB: success → length-prefixed RES, CK, IK, (KC)
+    result = {'type': '3G', 'status': 'success'}
+    i = 1
+    for name in ('res', 'ck', 'ik', 'kc'):
+        if i >= len(data):
+            break
+        ln = data[i]
+        i += 1
+        result[name] = data[i:i + ln].hex().upper()
+        i += ln
+    return result
+
+
+def _decode_auth(data):
+    """Decode an AUTHENTICATE response (GSM SRES+Kc, or 3G tag DB/DC)."""
+    if not data:
+        return {}
+    if data[0] in (0xDB, 0xDC):
+        return _decode_auth_3g(data)
+    # GSM: SRES (4 bytes) + Kc (8 bytes)
+    if len(data) >= 12:
+        return {
+            'type': 'GSM',
+            'sres': data[:4].hex().upper(),
+            'kc': data[4:12].hex().upper(),
+        }
+    return {'type': 'GSM', 'raw': data.hex().upper()}
+
+
+def _decode_response_for(ins, data):
+    """Decode response data using the command identified by INS."""
+    if ins == 0xA4:  # SELECT → FCP/FCI template
+        return _decode_fcp(data)
+    if ins in (0x88, 0x89):  # AUTHENTICATE → SRES/Kc or RES/CK/IK
+        return _decode_auth(data)
+    return None
+
+
 # ──────────────────── Decode entry point ────────────────────
 
 def decode_message(raw_data, prev=None):
@@ -588,6 +762,7 @@ def decode_message(raw_data, prev=None):
             response_to = decode_tr_command(body)
             if response_to:
                 result['response_to'] = response_to
+            result['response'] = _decode_tr_result(body)
         else:
             cat_command = decode_cat(ins, body)
             if cat_command:
@@ -602,6 +777,11 @@ def decode_message(raw_data, prev=None):
     if ins == 0xC0:
         if prev and prev.get('sw1') == '61':
             result['response_for'] = prev.get('ins_name')
+            prev_ins = prev.get('ins')
+            if prev_ins is not None and cmd_body_len > 0:
+                response = _decode_response_for(prev_ins, remaining[:cmd_body_len])
+                if response:
+                    result['response'] = response
         else:
             result['response_for'] = None
 
