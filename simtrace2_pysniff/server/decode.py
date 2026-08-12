@@ -465,6 +465,74 @@ def decode_message(raw_data):
     return result
 
 
+# ──────────────────── Sniff-level message types ────────────────────
+
+CHANGE_FLAGS = {
+    1 << 0: 'Card inserted',
+    1 << 1: 'Card ejected',
+    1 << 2: 'Reset asserted',
+    1 << 3: 'Reset de-asserted',
+    1 << 4: 'Waiting time timeout',
+}
+
+
+def decode_change(raw_data):
+    """Decode a SIMtrace2 sniff_change payload (4-byte flags)."""
+    if len(raw_data) < 4:
+        return None
+    import struct
+    flags = struct.unpack('<I', raw_data[:4])[0]
+    bits = []
+    for mask, name in sorted(CHANGE_FLAGS.items()):
+        if flags & mask:
+            bits.append(name)
+    return {
+        'type': 'change',
+        'flags_hex': f'{flags:08x}',
+        'flags': bits if bits else ['no changes'],
+    }
+
+
+def decode_fidi(raw_data):
+    """Decode a SIMtrace2 sniff_fidi payload (1-byte Fi/Di)."""
+    if len(raw_data) < 1:
+        return None
+    fidi = raw_data[0]
+    fi = fidi >> 4
+    di = fidi & 0x0f
+    fi_table = {0: 372, 1: 372, 2: 558, 3: 744, 4: 1116, 5: 1488, 6: 1860, 7: 0,
+                8: 0, 9: 512, 10: 768, 11: 1024, 12: 1536, 13: 2048, 14: 0, 15: 0}
+    di_table = {0: 0, 1: 1, 2: 2, 3: 4, 4: 8, 5: 16, 6: 32, 7: 64,
+                8: 12, 9: 20, 10: 2, 11: 4, 12: 8, 13: 16, 14: 32, 15: 64}
+    return {
+        'type': 'fidi',
+        'fidi': f'{fidi:02x}',
+        'fi': fi,
+        'di': di,
+        'fi_val': fi_table.get(fi, fi),
+        'di_val': di_table.get(di, di),
+    }
+
+
+def decode_sniff_msg(raw_data, msg_type):
+    """Decode a raw sniff message of the given type.
+
+    Returns a structured dict with at least a 'type' key, or None if
+    the message type has no structured decode.
+    """
+    if msg_type == 'tpdu' and raw_data:
+        return decode_message(raw_data)
+    if msg_type == 'change' and raw_data:
+        return decode_change(raw_data)
+    if msg_type == 'fidi' and raw_data:
+        return decode_fidi(raw_data)
+    if msg_type == 'atr':
+        return {'type': 'atr', 'hex': raw_data.hex() if raw_data else ''}
+    if msg_type == 'pps':
+        return {'type': 'pps', 'hex': raw_data.hex() if raw_data else ''}
+    return None
+
+
 def _decode_field(spec, value):
     """Decode a single P1 or P2 field from its byte value."""
     result = {'raw': f'{value:02x}'}

@@ -176,7 +176,7 @@ class Database:
             'data': data_blob.hex(),
             'flags': row[5],
         }
-        if row[3] == 'tpdu' and data_blob:
-            from .decode import decode_message
-            msg['decoded'] = decode_message(data_blob)
+        if row[3] in ('tpdu', 'change', 'fidi', 'atr', 'pps') and data_blob:
+            from .decode import decode_sniff_msg
+            msg['decoded'] = decode_sniff_msg(data_blob, row[3])
         return msg
