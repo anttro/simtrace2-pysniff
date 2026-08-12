@@ -160,6 +160,12 @@ class Database:
         initial_prev = self._last_tpdu_context(session_id, after_id + 1)
         return self._decode_rows(rows, initial_prev=initial_prev)
 
+    def get_messages_raw(self, session_id):
+        rows = self._conn.execute(
+            'SELECT elapsed, type, data FROM messages WHERE session_id=? ORDER BY elapsed, id',
+            (session_id,)).fetchall()
+        return [{'elapsed': r[0], 'type': r[1], 'data': r[2]} for r in rows]
+
     def count_messages(self, session_id):
         row = self._conn.execute(
             'SELECT COUNT(*) FROM messages WHERE session_id=?',

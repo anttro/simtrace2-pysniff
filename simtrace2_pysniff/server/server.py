@@ -4,11 +4,21 @@ import json
 import os
 import sys
 import threading
+import time
+from datetime import datetime
 from http.server import HTTPServer, BaseHTTPRequestHandler
-from urllib.parse import urlparse, parse_qs
+from urllib.parse import urlparse, parse_qs, quote
 
 from .database import Database
 from .capture import CaptureManager, GsmtapListener, DirectSniffer
+from ..gsmtap import build_gsmtap_packet, GSMTAP_SIM_ATR, GSMTAP_SIM_APDU
+from ..pcap import build_pcap
+
+
+def _content_disposition(filename):
+    """RFC 6266/5987 Content-Disposition filename (ASCII fallback + UTF-8)."""
+    fallback = filename.encode('ascii', 'replace').decode('ascii').replace('"', '_')
+    return f"attachment; filename=\"{fallback}\"; filename*=UTF-8''{quote(filename, safe='')}"
 
 
 class RequestHandler(BaseHTTPRequestHandler):
@@ -28,6 +38,15 @@ class RequestHandler(BaseHTTPRequestHandler):
         self.send_header('Access-Control-Allow-Headers', 'Content-Type')
         self.end_headers()
         self.wfile.write(body)
+
+    def _send_binary(self, data, content_type, filename):
+        self.send_response(200)
+        self.send_header('Content-Type', content_type)
+        self.send_header('Content-Length', len(data))
+        self.send_header('Content-Disposition', _content_disposition(filename))
+        self.send_header('Access-Control-Allow-Origin', '*')
+        self.end_headers()
+        self.wfile.write(data)
 
     def _send_error(self, status, message):
         self._send_json({'error': message}, status)
@@ -59,6 +78,9 @@ class RequestHandler(BaseHTTPRequestHandler):
             self._handle_status()
         elif path == '/api/sessions':
             self._handle_list_sessions()
+        elif path.startswith('/api/sessions/') and path.endswith('/pcap'):
+            session_id = int(path.split('/')[-2])
+            self._handle_get_session_pcap(session_id)
         elif path.startswith('/api/sessions/'):
             session_id = int(path.split('/')[-1])
             self._handle_get_session(session_id, params)
@@ -148,6 +170,32 @@ class RequestHandler(BaseHTTPRequestHandler):
             'total': total,
             'type_counts': type_counts,
         })
+
+    def _handle_get_session_pcap(self, session_id):
+        session = self.db.get_session(session_id)
+        if session is None:
+            self._send_error(404, 'Session not found')
+            return
+
+        try:
+            start_ts = datetime.fromisoformat(session['started']).timestamp()
+        except (ValueError, TypeError):
+            start_ts = time.time()
+
+        packets = []
+        for m in self.db.get_messages_raw(session_id):
+            if m['type'] == 'atr':
+                sub_type = GSMTAP_SIM_ATR
+            elif m['type'] == 'tpdu':
+                sub_type = GSMTAP_SIM_APDU
+            else:
+                continue
+            gsmtap_hdr = build_gsmtap_packet(sub_type, b'')[:16]
+            packets.append((gsmtap_hdr, m['data'], start_ts + m['elapsed']))
+
+        pcap = build_pcap(packets)
+        name = (session.get('name') or f'session-{session_id}') + '.pcap'
+        self._send_binary(pcap, 'application/vnd.tcpdump.pcap', name)
 
     def _handle_capture_latest(self, params):
         after_id = int(params.get('after', [0])[0])

@@ -4,6 +4,7 @@ Writes a standard PCAP file with LINKTYPE_GSMTAP (155, 0x009b).
 Each packet is a GSMTAP header + raw APDU/ATR data.
 """
 
+import io
 import struct
 import time
 
@@ -15,6 +16,39 @@ _PCAP_GLOBAL_HDR_SIZE = struct.calcsize(_PCAP_GLOBAL_HDR_FMT)
 
 _PCAP_PKT_HDR_FMT = '<IIII'
 _PCAP_PKT_HDR_SIZE = struct.calcsize(_PCAP_PKT_HDR_FMT)
+
+
+def build_pcap(packets):
+    """Build a PCAP file in memory.
+
+    *packets* is a list of ``(gsmtap_hdr, data, ts)`` tuples, where
+    gsmtap_hdr is the packed 16-byte GSMTAP header and ts is a
+    seconds-since-epoch float.  Returns the PCAP file contents as bytes.
+    """
+    buf = io.BytesIO()
+    buf.write(struct.pack(
+        _PCAP_GLOBAL_HDR_FMT,
+        PCAP_MAGIC,
+        2,
+        4,
+        0,
+        0,
+        65535,
+        LINKTYPE_GSMTAP,
+    ))
+    for gsmtap_hdr, data, ts in packets:
+        packet = gsmtap_hdr + data
+        ts_sec = int(ts)
+        ts_usec = int((ts - ts_sec) * 1_000_000)
+        buf.write(struct.pack(
+            _PCAP_PKT_HDR_FMT,
+            ts_sec,
+            ts_usec,
+            len(packet),
+            len(packet),
+        ))
+        buf.write(packet)
+    return buf.getvalue()
 
 
 class PcapWriter:
