@@ -15,6 +15,7 @@ dependencies = [
 
 [project.scripts]
 simtrace2-pysniff = "simtrace2_pysniff.__main__:main"
+simtrace2-pysniff-server = "simtrace2_pysniff.server.__main__:main"
 
 [tool.setuptools.packages.find]
 include = ["simtrace2_pysniff*"]

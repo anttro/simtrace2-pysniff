@@ -34,7 +34,11 @@ pip install -e .
 
 ## Running
 
-Two equivalent ways to start the sniffer:
+Two tools are provided:
+
+### Sniffer CLI (`simtrace2-pysniff`)
+
+Captures SIMtrace2 traffic and writes it to stdout, GSMTAP (Wireshark), or PCAP files.
 
 ### Startup script (Linux only)
 
@@ -49,11 +53,29 @@ launches the Python module.
 ./sniff-start.sh --pcap trace.pcap --format atr-time
 ```
 
-Options can also be set via environment variables:
+OPTIONS can also be set via environment variables:
 
 ```sh
 FORMAT=timestamp GSMTAP=127.0.0.1 ./sniff-start.sh
 ```
+
+### Analysis server (`simtrace2-pysniff-server`)
+
+Stores captured APDU traffic in SQLite and serves it over HTTP for the
+[simtrace-analyser](https://github.com/anttro/simtrace-analyser) PWA.
+Two capture modes:
+
+```sh
+# Listen for GSMTAP from simtrace2-pysniff (or original simtrace2-sniff):
+simtrace2-pysniff-server --capture gsmtap
+
+# Capture directly from SIMtrace2 hardware (no external tool needed):
+simtrace2-pysniff-server --capture direct
+```
+
+The PWA then connects to `http://127.0.0.1:8081` for live viewing and
+session management.  See the [simtrace-analyser](https://github.com/anttro/simtrace-analyser)
+repo for the browser interface.
 
 ### Python module (cross-platform)
 
