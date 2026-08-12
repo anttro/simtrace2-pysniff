@@ -148,8 +148,8 @@ Recovery options:
 
 Non-TPDU messages (ATR, PPS, card state changes, Fi/Di) print identically in all formats.
 
-- **GSMTAP**: ATR (subtype 1) and TPDU (subtype 2) over UDP to Wireshark
-- **PCAP**: all messages as GSMTAP-encapsulated packets (LINKTYPE 155), openable in Wireshark
+- **GSMTAP**: ATR and APDU messages over UDP (port 4729) to Wireshark
+- **PCAP**: ATR/TPDU messages as Ethernet/IP/UDP/GSMTAP packets, openable in Wireshark
 
 ## Background / Daemon
 
@@ -180,3 +180,10 @@ for msg in session.iter_messages():
 The tool survives hardware resets, cable disconnects, and firmware hangs
 by default — it reconnects with exponential backoff (1s → 30s cap).
 Use `--inactivity-timeout` to also trigger reconnect on silent firmware hangs.
+
+## Related
+
+- **[simtrace-analyser](https://github.com/anttro/simtrace-analyser)** — a
+  browser-based PWA for viewing live captures and browsing/exporting saved
+  sessions. Connects to `simtrace2-pysniff-server`.
+  Try it now: **https://simtrace.atroshin.ru**
