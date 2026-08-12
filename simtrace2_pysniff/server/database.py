@@ -128,14 +128,18 @@ class Database:
             'SELECT id, session_id, elapsed, type, data, flags FROM messages '
             'WHERE session_id=? ORDER BY elapsed, id LIMIT ? OFFSET ?',
             (session_id, limit, offset)).fetchall()
-        return [self._row_to_message(r) for r in rows]
+        initial_prev = None
+        if offset > 0 and rows:
+            initial_prev = self._last_tpdu_context(session_id, rows[0][0])
+        return self._decode_rows(rows, initial_prev=initial_prev)
 
     def get_messages_after(self, session_id, after_id):
         rows = self._conn.execute(
             'SELECT id, session_id, elapsed, type, data, flags FROM messages '
             'WHERE session_id=? AND id > ? ORDER BY elapsed, id',
             (session_id, after_id)).fetchall()
-        return [self._row_to_message(r) for r in rows]
+        initial_prev = self._last_tpdu_context(session_id, after_id + 1)
+        return self._decode_rows(rows, initial_prev=initial_prev)
 
     def count_messages(self, session_id):
         row = self._conn.execute(
@@ -166,7 +170,7 @@ class Database:
             (session_id,)).fetchall()
         return [{'type': r[0], 'count': r[1]} for r in rows]
 
-    def _row_to_message(self, row):
+    def _row_to_message(self, row, prev=None):
         data_blob = row[4]
         flags = row[5]
         msg = {
@@ -180,9 +184,36 @@ class Database:
         if row[3] in ('tpdu', 'change', 'fidi', 'atr', 'pps'):
             try:
                 from .decode import decode_sniff_msg
-                msg['decoded'] = decode_sniff_msg(data_blob, row[3], flags)
+                msg['decoded'] = decode_sniff_msg(data_blob, row[3], flags, prev=prev)
             except Exception as e:
                 import sys
                 print(f'Decode error for msg {row[0]} ({row[3]}, {len(data_blob)} bytes): {e}',
                       file=sys.stderr)
         return msg
+
+    def _last_tpdu_context(self, session_id, before_id):
+        """Return previous-command context from the last TPDU with id < before_id."""
+        row = self._conn.execute(
+            "SELECT data FROM messages WHERE session_id=? AND id < ? AND type='tpdu' "
+            "ORDER BY id DESC LIMIT 1", (session_id, before_id)).fetchone()
+        if row is None:
+            return None
+        from .decode import decode_sniff_msg
+        d = decode_sniff_msg(row[0], 'tpdu', 0)
+        if not d:
+            return None
+        return {'ins_name': d.get('ins_name'), 'sw1': (d.get('sw') or {}).get('sw1')}
+
+    def _decode_rows(self, rows, initial_prev=None):
+        msgs = []
+        prev = initial_prev
+        for row in rows:
+            msg = self._row_to_message(row, prev=prev)
+            d = msg.get('decoded')
+            if msg['type'] == 'tpdu' and d and d.get('ins_hex'):
+                prev = {
+                    'ins_name': d.get('ins_name'),
+                    'sw1': (d.get('sw') or {}).get('sw1'),
+                }
+            msgs.append(msg)
+        return msgs

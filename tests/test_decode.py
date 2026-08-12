@@ -66,11 +66,11 @@ class TestCatDecoding(unittest.TestCase):
         self.assertEqual(r['ins_name'], 'ENVELOPE')
         self.assertEqual(r['cat_command'], 'EVENT DOWNLOAD')
 
-    def test_tr_no_cat(self):
+    def test_tr_has_cat(self):
         r = decode_message(bytes.fromhex(
             '801400000C8103010500020282810301009130'))
         self.assertEqual(r['ins_name'], 'TERMINAL RESPONSE')
-        self.assertNotIn('cat_command', r)
+        self.assertEqual(r['cat_command'], 'SET UP EVENT LIST')
 
     def test_select_no_cat(self):
         r = decode_message(bytes.fromhex('a0a40000023f009000'))
@@ -117,6 +117,40 @@ class TestChangeAndFidiDecoding(unittest.TestCase):
         self.assertEqual(r['di'], 7)
         self.assertEqual(r['fi_val'], 512)
         self.assertEqual(r['di_val'], 64)
+
+
+class TestTerminalResponse(unittest.TestCase):
+    def test_tr_setup_event_list(self):
+        r = decode_message(bytes.fromhex(
+            '801400000C8103010500020282810301009130'))
+        self.assertEqual(r['ins_name'], 'TERMINAL RESPONSE')
+        self.assertEqual(r['cat_command'], 'SET UP EVENT LIST')
+
+    def test_tr_setup_menu(self):
+        r = decode_message(bytes.fromhex(
+            '801400000C810301250002028281830100910F'))
+        self.assertEqual(r['cat_command'], 'SET UP MENU')
+
+    def test_tr_poll_interval(self):
+        r = decode_message(bytes.fromhex(
+            '80140000108103010300020282810301000402011E9000'))
+        self.assertEqual(r['cat_command'], 'POLL INTERVAL')
+
+
+class TestGetResponseContext(unittest.TestCase):
+    GET_RESPONSE = bytes.fromhex('00C000002962278202782183023F00A50A800171')
+
+    def test_with_prev_select(self):
+        r = decode_message(self.GET_RESPONSE, prev={'ins_name': 'SELECT', 'sw1': '61'})
+        self.assertEqual(r['response_for'], 'SELECT')
+
+    def test_with_prev_non_61(self):
+        r = decode_message(self.GET_RESPONSE, prev={'ins_name': 'SELECT', 'sw1': '90'})
+        self.assertIsNone(r['response_for'])
+
+    def test_orphaned(self):
+        r = decode_message(self.GET_RESPONSE, prev=None)
+        self.assertIsNone(r['response_for'])
 
 
 if __name__ == '__main__':

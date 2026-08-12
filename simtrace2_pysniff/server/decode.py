@@ -497,17 +497,24 @@ def decode_cat(ins, body):
                     return CAT_COMMAND_TYPES.get(v2[1])
     elif ins == 0xC2:  # ENVELOPE → envelope type
         return ENVELOPE_TYPES.get(body[0])
+    elif ins == 0x14:  # TERMINAL RESPONSE → echoes proactive command type
+        for tag, _length, value in parse_tlv(body):
+            if tag == 0x81 and len(value) >= 2:
+                return CAT_COMMAND_TYPES.get(value[1])
     return None
 
 
 # ──────────────────── Decode entry point ────────────────────
 
-def decode_message(raw_data):
+def decode_message(raw_data, prev=None):
     """Decode a raw TPDU byte string into a structured dict.
 
     Returns None for non-TPDU messages (ATR, PPS, CHANGE, FIDI)
     or un-parseable data.  Returns a dict with ins_name, cla, p1, p2,
     p3, body, and sw keys for valid TPDU messages.
+
+    *prev* optionally carries the previous TPDU's decoded context
+    (``{'ins_name': str, 'sw1': str}``) for resolving GET RESPONSE.
     """
     if not raw_data or len(raw_data) < 5:
         return None
@@ -576,6 +583,14 @@ def decode_message(raw_data):
     if sw_bytes:
         result['sw'] = decode_sw(sw_bytes)
 
+    # GET RESPONSE context: the response belongs to the previous command
+    # if that command ended with SW1 '61' (response data available).
+    if ins == 0xC0:
+        if prev and prev.get('sw1') == '61':
+            result['response_for'] = prev.get('ins_name')
+        else:
+            result['response_for'] = None
+
     return result
 
 
@@ -624,14 +639,17 @@ def decode_fidi(raw_data):
     }
 
 
-def decode_sniff_msg(raw_data, msg_type, flags=0):
+def decode_sniff_msg(raw_data, msg_type, flags=0, prev=None):
     """Decode a raw sniff message of the given type.
 
     Returns a structured dict with at least a 'type' key, or None if
     the message type has no structured decode.
+
+    *prev* optionally carries the previous TPDU's decoded context for
+    resolving GET RESPONSE.
     """
     if msg_type == 'tpdu' and raw_data:
-        return decode_message(raw_data)
+        return decode_message(raw_data, prev=prev)
     if msg_type == 'change':
         return decode_change(flags)
     if msg_type == 'fidi' and raw_data:
