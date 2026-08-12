@@ -162,7 +162,7 @@ def main():
                 else:
                     gsmtap.send_apdu(msg.data, msg.slot_nr)
 
-            if pcap is not None:
+            if pcap is not None and msg.type in ('atr', 'tpdu'):
                 sub_type = GSMTAP_SIM_ATR if msg.type == 'atr' else GSMTAP_SIM_APDU
                 gsmtap_hdr = build_gsmtap_packet(sub_type, b'')[:16]
                 pcap.write_packet(gsmtap_hdr, msg.data, msg.timestamp)
