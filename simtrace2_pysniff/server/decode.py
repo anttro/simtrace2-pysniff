@@ -478,6 +478,51 @@ def parse_tlv(data):
     return tlvs
 
 
+# TS 102 223 — PROVIDE LOCAL INFORMATION command qualifier values
+PLI_QUALIFIERS = {
+    0x00: 'Location Info (MCC, MNC, LAC/TAC, Cell ID)',
+    0x01: 'IMEI',
+    0x02: 'Network Measurement results',
+    0x03: 'Date, time and time zone',
+    0x04: 'Language setting',
+    0x05: 'Timing Advance',
+    0x06: 'Access Technology (single)',
+    0x08: 'IMEISV',
+    0x09: 'Search Mode',
+    0x0A: 'Battery charge state',
+    0x0C: 'Current WSID',
+    0x0D: 'Broadcast Network info',
+    0x0E: 'Multiple Access Technologies',
+    0x0F: 'Location Info (multi-RAT)',
+    0x10: 'NMR (multi-RAT)',
+    0x11: 'CSG ID list + HNB name',
+    0x12: 'H(e)NB IP address',
+    0x13: 'H(e)NB surrounding macrocells',
+    0x14: 'Current WLAN identifier',
+    0x15: 'Slices information',
+    0x16: 'CAG information list',
+    0x17: 'Rejected slices information',
+}
+
+
+def _command_details_name(value):
+    """Decode a Command Details TLV value (number, type, qualifier).
+
+    Returns the command type name, with the PLI qualifier description
+    appended for PROVIDE LOCAL INFORMATION (type 0x26).
+    """
+    if len(value) < 2:
+        return None
+    name = CAT_COMMAND_TYPES.get(value[1])
+    if not name:
+        return None
+    if value[1] == 0x26 and len(value) >= 3:  # PROVIDE LOCAL INFORMATION
+        q = PLI_QUALIFIERS.get(value[2])
+        if q:
+            name = f'{name} — {q}'
+    return name
+
+
 def decode_cat(ins, body):
     """Decode a CAT (TS 102 223) payload, returning the command/event name.
 
@@ -493,8 +538,8 @@ def decode_cat(ins, body):
             if tag != 0xD0:
                 continue
             for t2, _l2, v2 in parse_tlv(value):
-                if t2 == 0x81 and len(v2) >= 2:
-                    return CAT_COMMAND_TYPES.get(v2[1])
+                if t2 == 0x81:
+                    return _command_details_name(v2)
     elif ins == 0xC2:  # ENVELOPE → envelope type
         return ENVELOPE_TYPES.get(body[0])
     return None
@@ -508,8 +553,8 @@ def decode_tr_command(body):
     if not body:
         return None
     for tag, _length, value in parse_tlv(body):
-        if tag == 0x81 and len(value) >= 2:
-            return CAT_COMMAND_TYPES.get(value[1])
+        if tag == 0x81:
+            return _command_details_name(value)
     return None
 
 

@@ -58,7 +58,8 @@ class TestCatDecoding(unittest.TestCase):
     def test_fetch_provide_local_info(self):
         r = decode_message(bytes.fromhex(
             '801200000BD0098103012600820281829000'))
-        self.assertEqual(r['cat_command'], 'PROVIDE LOCAL INFORMATION')
+        self.assertEqual(r['cat_command'],
+                         'PROVIDE LOCAL INFORMATION — Location Info (MCC, MNC, LAC/TAC, Cell ID)')
 
     def test_envelope_event_download(self):
         r = decode_message(bytes.fromhex(
@@ -136,6 +137,30 @@ class TestTerminalResponse(unittest.TestCase):
         r = decode_message(bytes.fromhex(
             '80140000108103010300020282810301000402011E9000'))
         self.assertEqual(r['response_to'], 'POLL INTERVAL')
+
+
+class TestPliQualifier(unittest.TestCase):
+    def test_tr_pli_imei(self):
+        r = decode_message(bytes.fromhex(
+            '8014000016810301260102028281030106130952F0991EC57A68009F'))
+        self.assertEqual(r['response_to'], 'PROVIDE LOCAL INFORMATION — IMEI')
+
+    def test_fetch_pli_location(self):
+        r = decode_message(bytes.fromhex(
+            '801200000BD0098103012600820281829000'))
+        self.assertEqual(r['cat_command'],
+                         'PROVIDE LOCAL INFORMATION — Location Info (MCC, MNC, LAC/TAC, Cell ID)')
+
+    def test_fetch_pli_date_time(self):
+        r = decode_message(bytes.fromhex(
+            '801200000BD0098103012603820281829000'))
+        self.assertEqual(r['cat_command'],
+                         'PROVIDE LOCAL INFORMATION — Date, time and time zone')
+
+    def test_non_pli_no_qualifier(self):
+        r = decode_message(bytes.fromhex(
+            '801400000C810301250002028281830100910F'))
+        self.assertEqual(r['response_to'], 'SET UP MENU')
 
 
 class TestGetResponseContext(unittest.TestCase):
