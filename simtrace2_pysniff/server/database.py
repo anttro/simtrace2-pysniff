@@ -41,6 +41,7 @@ class Database:
     def __init__(self, db_path=None):
         if db_path is None:
             db_path = DEFAULT_DB_PATH
+        self._db_path = db_path
         os.makedirs(os.path.dirname(db_path), exist_ok=True)
         self._conn = sqlite3.connect(db_path, check_same_thread=False)
         self._conn.execute('PRAGMA journal_mode=WAL')
@@ -72,6 +73,24 @@ class Database:
     def delete_session(self, session_id):
         self._conn.execute('DELETE FROM messages WHERE session_id=?', (session_id,))
         self._conn.execute('DELETE FROM sessions WHERE id=?', (session_id,))
+        self._conn.commit()
+
+    def count_sessions(self):
+        row = self._conn.execute('SELECT COUNT(*) FROM sessions').fetchone()
+        return row[0]
+
+    def db_size(self):
+        """Total on-disk size of the SQLite database (db + WAL + SHM)."""
+        total = 0
+        for suffix in ('', '-wal', '-shm'):
+            p = self._db_path + suffix
+            if os.path.exists(p):
+                total += os.path.getsize(p)
+        return total
+
+    def vacuum(self):
+        self._conn.execute('VACUUM')
+        self._conn.execute('PRAGMA wal_checkpoint(TRUNCATE)')
         self._conn.commit()
 
     def get_session(self, session_id):

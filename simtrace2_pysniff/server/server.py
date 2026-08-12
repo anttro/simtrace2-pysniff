@@ -126,7 +126,11 @@ class RequestHandler(BaseHTTPRequestHandler):
 
     def _handle_list_sessions(self):
         sessions = self.db.list_sessions()
-        self._send_json({'sessions': sessions})
+        self._send_json({
+            'sessions': sessions,
+            'total_sessions': self.db.count_sessions(),
+            'db_size': self.db.db_size(),
+        })
 
     def _handle_get_session(self, session_id, params):
         session = self.db.get_session(session_id)
@@ -192,6 +196,7 @@ class RequestHandler(BaseHTTPRequestHandler):
         if self.capture.session_id == session_id:
             self.capture.stop_session()
         self.db.delete_session(session_id)
+        self.db.vacuum()
         self._send_json({'ok': True})
 
     def _handle_search(self, session_id, query):
