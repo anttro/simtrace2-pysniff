@@ -12,7 +12,7 @@ from urllib.parse import urlparse, parse_qs, quote
 from .database import Database
 from .capture import CaptureManager, GsmtapListener, DirectSniffer
 from ..gsmtap import build_gsmtap_packet, GSMTAP_SIM_ATR, GSMTAP_SIM_APDU
-from ..pcap import build_pcap
+from ..pcap import build_pcap, parse_pcap, parse_pcapng
 
 
 def _content_disposition(filename):
@@ -56,6 +56,12 @@ class RequestHandler(BaseHTTPRequestHandler):
         if length == 0:
             return {}
         return json.loads(self.rfile.read(length))
+
+    def _read_body(self):
+        length = int(self.headers.get('Content-Length', 0))
+        if length == 0:
+            return b''
+        return self.rfile.read(length)
 
     def _parse_path(self):
         parsed = urlparse(self.path)
@@ -104,12 +110,14 @@ class RequestHandler(BaseHTTPRequestHandler):
 
     # --- POST ---
     def do_POST(self):
-        path, _ = self._parse_path()
+        path, params = self._parse_path()
 
         if path == '/api/capture/start':
             self._handle_capture_start()
         elif path == '/api/capture/stop':
             self._handle_capture_stop()
+        elif path == '/api/sessions/import':
+            self._handle_import_pcap(params)
         else:
             self._send_error(404, 'Not found')
 
@@ -234,6 +242,41 @@ class RequestHandler(BaseHTTPRequestHandler):
             'session_id': session_id,
             'ended': session['ended'],
             'messages_count': self.db.count_messages(session_id),
+        })
+
+    def _handle_import_pcap(self, params):
+        raw = self._read_body()
+        name = (params.get('name', [''])[0]).strip()
+
+        if not raw:
+            self._send_error(400, 'Empty file')
+            return
+
+        if raw[:4] == b'\x0a\x0d\x0d\x0a':
+            packets = list(parse_pcapng(raw))
+        else:
+            packets = list(parse_pcap(raw))
+
+        if not packets:
+            self._send_error(400, 'No GSMTAP data found in trace')
+            return
+
+        session_id = self.db.create_session('pcap')
+        if name:
+            self.db.rename_session(session_id, name)
+
+        first_ts = packets[0][0]
+        rows = []
+        for ts, msg_type, payload in packets:
+            elapsed = round(ts - first_ts, 6) if ts is not None else 0.0
+            rows.append((max(0.0, elapsed), msg_type, payload, 0))
+        self.db.insert_messages(session_id, rows)
+        self.db.close_session(session_id)
+
+        self._send_json({
+            'session_id': session_id,
+            'name': name,
+            'message_count': len(packets),
         })
 
     def _handle_rename_session(self, session_id, name):

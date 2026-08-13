@@ -134,6 +134,14 @@ class Database:
         self._conn.commit()
         return cur.lastrowid
 
+    def insert_messages(self, session_id, rows):
+        """Bulk-insert messages; *rows* is an iterable of
+        (elapsed, msg_type, data, flags) tuples.  Returns the last rowid."""
+        self._conn.executemany(
+            'INSERT INTO messages (session_id, elapsed, type, data, flags) VALUES (?,?,?,?,?)',
+            [(session_id, elapsed, msg_type, data, flags) for elapsed, msg_type, data, flags in rows])
+        self._conn.commit()
+
     def get_message(self, msg_id):
         row = self._conn.execute(
             'SELECT id, session_id, elapsed, type, data, flags FROM messages WHERE id=?',
