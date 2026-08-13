@@ -103,12 +103,14 @@ def decode_sw(raw_sw):
 def decode_cla(cla):
     chain_bits = (cla >> 4) & 0x03
     chain_names = {0: 'last or only', 1: 'first in chain', 2: 'not last in chain', 3: 'not last'}
-    interclass = 'inter-industry' if (cla & 0x80) == 0 else 'proprietary'
-    note = None
-    if cla in (0xa0, 0x80):
-        note = 'standard UICC CLA'
+    if cla == 0x80:
+        interclass = 'ETSI-defined (UICC/USIM)'
+    elif cla == 0xa0:
+        interclass = 'ETSI-defined (SIM/GSM)'
     elif cla == 0x00:
-        note = 'standard inter-industry CLA'
+        interclass = 'inter-industry (ISO 7816-4)'
+    else:
+        interclass = 'inter-industry' if (cla & 0x80) == 0 else 'proprietary'
     result = {
         'hex': f'{cla:02x}',
         'interclass': interclass,
@@ -116,8 +118,6 @@ def decode_cla(cla):
         'secure_messaging': 'none' if (cla & 0x0c) == 0 else 'SM present',
         'chain': chain_names.get(chain_bits, f'unknown ({chain_bits})'),
     }
-    if note:
-        result['note'] = note
     return result
 
 
