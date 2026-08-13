@@ -600,17 +600,144 @@ TR_RESULTS = {
 }
 
 
-def _decode_tr_result(body):
-    """Decode the Result TLV of a TERMINAL RESPONSE body."""
+def _swap_nibbles(h):
+    """Swap the nibbles of each hex byte in a hex string."""
+    return ''.join(b[1] + b[0] for b in (h[i:i + 2] for i in range(0, len(h), 2)))
+
+
+def _decode_plmn(b):
+    """Decode a 3-byte PLMN (TS 24.008) into {'mcc', 'mnc'}."""
+    if len(b) < 3:
+        return None
+    h = b.hex()
+    mcc = (h[1] + h[0] + h[3]).upper().strip('F') or '0'
+    mnc = (h[5] + h[4] + h[2]).upper().strip('F') or '0'
+    return {'mcc': mcc, 'mnc': mnc}
+
+
+def _decode_imei(val):
+    """Decode an 8-byte BCD IMEI (TS 24.008 Mobile Identity) into a string."""
+    swapped = _swap_nibbles(val.hex())
+    if not swapped:
+        return None
+    # First nibble is the odd/even indicator (0x8|…) with digit 1 following;
+    # drop it and any trailing 'F' padding.
+    digits = swapped[1:].rstrip('fF')
+    return digits or None
+
+
+# TS 102 223 §6.8.7 Local information — COMPREHENSION-TLV tags (base form)
+PLI_LOCATION_INFO = 0x13
+PLI_IMEI = 0x14
+PLI_NMR = 0x16
+PLI_DATETIME = 0x26
+PLI_LANGUAGE = 0x2D
+PLI_ACCESS_TECH = 0x3F
+PLI_TIMING_ADVANCE = 0x46
+PLI_BATTERY = 0x63
+PLI_SEARCH_MODE = 0x65
+
+_ACCESS_TECH_NAMES = {
+    0x00: 'GSM', 0x01: 'ANSI-136 (TIA/EIA-553)', 0x02: 'IS-136 (TIA/EIA-136)',
+    0x03: 'UTRAN', 0x04: 'TETRA', 0x05: 'cdma2000 1xRTT',
+    0x06: 'cdma2000 HRPD', 0x07: 'E-UTRAN', 0x08: 'eHRPD', 0x0A: 'NR',
+}
+
+_BATTERY_NAMES = {
+    0x00: 'very low', 0x01: 'low', 0x02: 'average', 0x03: 'good', 0x05: 'full',
+}
+
+_ME_STATUS_NAMES = {0x00: 'idle', 0x01: 'not idle'}
+
+_SEARCH_MODE_NAMES = {0x00: 'manual', 0x01: 'automatic'}
+
+
+def _decode_datetime(val):
+    """Decode TS 23.040 Service-Centre-Time-Stamp (7 bytes) into a string."""
+    if len(val) < 7:
+        return None
+    b = val[:7]
+    bcd = lambda x: (x >> 4) * 10 + (x & 0x0F)
+    yy, mm, dd, hh, mi, ss = (bcd(x) for x in b[:6])
+    tz_raw = b[6]
+    if (tz_raw & 0x0F) == 0x0F:
+        tz_str = 'unknown'
+    else:
+        tz_neg = bool(tz_raw & 0x08)
+        tz_q = (tz_raw & 0x07) * 10 + (tz_raw >> 4)
+        tz_str = f"{'-' if tz_neg else '+'}{tz_q // 4:02d}:{(tz_q % 4) * 15:02d}"
+    return f'20{yy:02d}-{mm:02d}-{dd:02d} {hh:02d}:{mi:02d}:{ss:02d} (UTC{tz_str})'
+
+
+def _decode_local_info(tag, value):
+    """Decode a PLI local-information TLV value into a display dict."""
+    if tag == PLI_LOCATION_INFO:
+        if len(value) >= 7:
+            plmn = _decode_plmn(value[:3]) or {}
+            lac = value[3:5].hex().upper()
+            cell = value[5:].hex().upper()
+            loc = f"MCC {plmn.get('mcc', '?')} MNC {plmn.get('mnc', '?')} · LAC 0x{lac} · Cell 0x{cell}"
+            return {'label': 'Location', 'value': loc}
+    elif tag == PLI_IMEI:
+        imei = _decode_imei(value)
+        if imei:
+            return {'label': 'IMEI', 'value': imei}
+    elif tag == PLI_DATETIME:
+        dt = _decode_datetime(value)
+        if dt:
+            return {'label': 'Date/time', 'value': dt}
+    elif tag == PLI_LANGUAGE:
+        lang = value.decode('ascii', 'replace').strip() or value.hex().upper()
+        return {'label': 'Language', 'value': lang}
+    elif tag == PLI_ACCESS_TECH:
+        names = [_ACCESS_TECH_NAMES.get(b, f'0x{b:02X}') for b in value]
+        return {'label': 'Access technology', 'value': ', '.join(names)}
+    elif tag == PLI_TIMING_ADVANCE:
+        if len(value) >= 2:
+            status = _ME_STATUS_NAMES.get(value[0], f'0x{value[0]:02X}')
+            return {'label': 'Timing advance', 'value': f'{status}, TA {value[1]}'}
+    elif tag == PLI_BATTERY:
+        if value:
+            return {'label': 'Battery', 'value': _BATTERY_NAMES.get(value[0], f'0x{value[0]:02X}')}
+    elif tag == PLI_SEARCH_MODE:
+        if value:
+            return {'label': 'Search mode', 'value': _SEARCH_MODE_NAMES.get(value[0], f'0x{value[0]:02X}')}
+    elif tag == PLI_NMR:
+        return {'label': 'Network measurement results', 'value': value.hex().upper()}
+    return None
+
+
+def _decode_tr_response(body):
+    """Decode the TLVs of a TERMINAL RESPONSE body.
+
+    Returns a dict with the Result (code/name), and any additional
+    information: Duration (0x04), Item Identifier (0x05) and the
+    PROVIDE LOCAL INFORMATION data objects.
+    """
+    result = {}
+    local = {}
     for tag, _length, value in parse_tlv(body):
         if tag in (0x03, 0x83) and value:
             code = value[0]
-            return {
-                'code': f'0x{code:02X}',
-                'name': TR_RESULTS.get(code),
-                'raw': value.hex().upper(),
-            }
-    return None
+            result['code'] = f'0x{code:02X}'
+            result['name'] = TR_RESULTS.get(code)
+            result['raw'] = value.hex().upper()
+        elif tag == 0x04 and len(value) >= 2:  # Duration (POLL INTERVAL)
+            result['duration'] = (value[0] << 8) | value[1]
+        elif tag == 0x05 and value:  # Item Identifier (SELECT ITEM)
+            result['item_identifier'] = value[0]
+        else:
+            info = _decode_local_info(tag, value)
+            if info:
+                local[info['label']] = info['value']
+    if local:
+        result['local_info'] = local
+    return result or None
+
+
+def _decode_tr_result(body):
+    """Back-compat wrapper returning the Result TLV of a TERMINAL RESPONSE."""
+    return _decode_tr_response(body)
 
 
 # TS 102 221 Table 11.5 — file descriptor byte
@@ -868,6 +995,69 @@ def _decode_dcs(dcs):
     return encoding, (dcs & 0x03)
 
 
+def _decode_gsm7_octets(data):
+    """Decode 8-bit-per-octet GSM 7-bit default alphabet text (TS 102 221)."""
+    out = []
+    i = 0
+    while i < len(data):
+        b = data[i]
+        if b == 0x1B and i + 1 < len(data):
+            out.append(GSM7_EXTENSION.get(data[i + 1], ' '))
+            i += 2
+        else:
+            out.append(GSM7_ALPHABET[b] if b < len(GSM7_ALPHABET) else '?')
+            i += 1
+    return ''.join(out)
+
+
+def _decode_annex_a(raw):
+    """Decode a TS 102 221 Annex A text string (GsmOrUcs2).
+
+    Magic prefix 0x80/0x81/0x82 → UCS-2 variants; otherwise GSM 7-bit
+    default alphabet coded one octet per character.
+    """
+    if not raw:
+        return ''
+    if raw == b'\xff' * len(raw):
+        return ''
+    if raw[0] == 0x80:
+        return raw[1:].decode('utf_16_be', 'replace')
+    if raw[0] == 0x81 and len(raw) >= 3:
+        num_chars = raw[1]
+        base_ptr = raw[2] << 7
+        out = []
+        for ch in raw[3:3 + num_chars]:
+            if ch & 0x80:
+                out.append(chr((ch & 0x7F) + base_ptr))
+            else:
+                out.append(GSM7_ALPHABET[ch] if ch < len(GSM7_ALPHABET) else '?')
+        return ''.join(out)
+    if raw[0] == 0x82 and len(raw) >= 4:
+        num_chars = raw[1]
+        base_ptr = (raw[2] << 8) | raw[3]
+        out = []
+        for ch in raw[4:4 + num_chars]:
+            if ch & 0x80:
+                out.append(chr((ch & 0x7F) + base_ptr))
+            else:
+                out.append(GSM7_ALPHABET[ch] if ch < len(GSM7_ALPHABET) else '?')
+        return ''.join(out)
+    return _decode_gsm7_octets(raw)
+
+
+def _decode_dcs_text(raw):
+    """Decode a Text String (TS 102 223 §8.15): DCS byte + text."""
+    if not raw or len(raw) < 2:
+        return raw.hex() if raw else ''
+    dcs = raw[0]
+    data = raw[1:]
+    if (dcs & 0x0C) == 0x08:
+        return data.decode('utf_16_be', 'replace')
+    if (dcs & 0x0C) == 0x04:
+        return data.decode('latin-1', 'replace')
+    return _decode_gsm7_octets(data)
+
+
 def _decode_sm_tpdu(data):
     """Decode a GSM 03.40 (TS 23.040) SM TPDU (SMS-DELIVER / SMS-SUBMIT)."""
     if not data:
@@ -1009,6 +1199,69 @@ def _decode_envelope(body):
     return result
 
 
+# ──────────────────── Proactive command-body decoder ────────────────────
+
+# TS 102 223 §6.6 data-object tags (base value; comprehension bit masked off)
+_P_CMD_DETAILS = 0x01
+_P_DEVICE_IDS = 0x02
+_P_DURATION = 0x04
+_P_ALPHA_ID = 0x05
+_P_ADDRESS = 0x06
+_P_SMS_TPDU = 0x0B
+_P_TEXT_STRING = 0x0D
+_P_ITEM = 0x0F
+_P_RESPONSE_LEN = 0x11
+_P_EVENT_LIST = 0x19
+
+
+def _decode_proactive(body):
+    """Decode a FETCH proactive command body (D0 TLV) into a dict.
+
+    Unwraps the D0 BER-TLV and decodes the command's data objects,
+    dispatching on the Type of Command from the Command Details (0x81).
+    """
+    if not body:
+        return None
+    inner = None
+    for tag, _length, value in parse_tlv(body):
+        if tag == 0xD0:
+            inner = parse_tlv(value)
+            break
+    if inner is None:
+        return None
+
+    cmd_type = None
+    result = {}
+    items = []
+    for tag, _length, value in inner:
+        base = tag & 0x7F
+        if base == _P_CMD_DETAILS and len(value) >= 2:
+            cmd_type = value[1]
+        elif base == _P_ALPHA_ID and value:
+            result['title'] = _decode_annex_a(value)
+        elif base == _P_TEXT_STRING and value:
+            result['text'] = _decode_dcs_text(value)
+        elif base == _P_ITEM and len(value) >= 2:
+            items.append({'id': value[0], 'text': _decode_annex_a(value[1:])})
+        elif base == _P_SMS_TPDU and value:
+            result['tpdu'] = _decode_sm_tpdu(value)
+        elif base == _P_DURATION and len(value) >= 2:
+            result['duration'] = (value[0] << 8) | value[1]
+        elif base == _P_RESPONSE_LEN and len(value) >= 2:
+            result['response_length'] = {'min': value[0], 'max': value[1]}
+        elif base == _P_EVENT_LIST and value:
+            result['events'] = [EVENT_TYPES.get(e, f'0x{e:02X}') for e in value]
+        elif base == _P_ADDRESS and value:
+            result['address'] = _decode_bcd_address(value)
+
+    if cmd_type is None:
+        return None
+    result['type'] = CAT_COMMAND_TYPES.get(cmd_type, f'0x{cmd_type:02X}')
+    if items:
+        result['items'] = items
+    return result
+
+
 # ──────────────────── Decode entry point ────────────────────
 
 def decode_message(raw_data, prev=None):
@@ -1093,6 +1346,8 @@ def decode_message(raw_data, prev=None):
                 result['cmd'] = _decode_auth_cmd(body, p2)
             elif ins == 0xC2:  # ENVELOPE command body
                 result['cmd'] = _decode_envelope(body)
+            elif ins == 0x12:  # FETCH → proactive command body
+                result['cmd'] = _decode_proactive(body)
 
     # SW
     if sw_bytes:

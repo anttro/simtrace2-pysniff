@@ -249,6 +249,51 @@ class TestTrResult(unittest.TestCase):
         self.assertEqual(r['name'], 'Proactive UICC session terminated by the user')
 
 
+class TestTrAdditionalInfo(unittest.TestCase):
+    def test_poll_interval_duration(self):
+        r = decode_message(bytes.fromhex(
+            '80140000108103010300020282810301000402011E9000'))
+        self.assertEqual(r['response_to'], 'POLL INTERVAL')
+        self.assertEqual(r['response']['duration'], 286)
+
+    def test_pli_location_info(self):
+        r = decode_message(bytes.fromhex(
+            '8014000017810301260002028281030106130952F0991EC57A43C09F9000'))
+        self.assertEqual(
+            r['response']['local_info']['Location'],
+            'MCC 250 MNC 99 · LAC 0x1EC5 · Cell 0x7A43C09F')
+
+    def test_pli_imei(self):
+        r = decode_message(bytes.fromhex(
+            '801400001681030126010202828103010014088A763201652428089000'))
+        self.assertEqual(r['response']['local_info']['IMEI'],
+                         '867231056428280')
+
+    def test_pli_datetime(self):
+        from simtrace2_pysniff.server.decode import _decode_datetime
+        self.assertEqual(
+            _decode_datetime(bytes.fromhex('26081214300021')),
+            '2026-08-12 14:30:00 (UTC+03:00)')
+        self.assertEqual(
+            _decode_datetime(bytes.fromhex('260812143000FF')),
+            '2026-08-12 14:30:00 (UTCunknown)')
+
+    def test_pli_language(self):
+        from simtrace2_pysniff.server.decode import _decode_local_info, PLI_LANGUAGE
+        self.assertEqual(_decode_local_info(PLI_LANGUAGE, b'en'),
+                         {'label': 'Language', 'value': 'en'})
+
+    def test_pli_battery(self):
+        from simtrace2_pysniff.server.decode import _decode_local_info, PLI_BATTERY
+        self.assertEqual(_decode_local_info(PLI_BATTERY, b'\x05'),
+                         {'label': 'Battery', 'value': 'full'})
+
+    def test_pli_access_tech(self):
+        from simtrace2_pysniff.server.decode import _decode_local_info, PLI_ACCESS_TECH
+        self.assertEqual(_decode_local_info(PLI_ACCESS_TECH, bytes([0x03, 0x07])),
+                         {'label': 'Access technology', 'value': 'UTRAN, E-UTRAN'})
+
+
 class TestAuthCommand(unittest.TestCase):
     def test_3g_rand_autn(self):
         r = decode_message(bytes.fromhex(
@@ -345,6 +390,65 @@ class TestBcdAddress(unittest.TestCase):
     def test_odd_digits(self):
         from simtrace2_pysniff.server.decode import _decode_bcd_address
         self.assertEqual(_decode_bcd_address(bytes.fromhex('9121436587F9')), '+123456789')
+
+
+class TestProactiveDecode(unittest.TestCase):
+    def test_setup_menu(self):
+        r = decode_message(bytes.fromhex(
+            '8012000030D02E810301250082028182050B416C6661204D6F62696C'
+            '658F16808112089DB0C1C2C0BEB9BAB82F53657474696E67739000'))
+        cmd = r['cmd']
+        self.assertEqual(cmd['type'], 'SET UP MENU')
+        self.assertEqual(cmd['title'], 'Alfa Mobile')
+        self.assertEqual(cmd['items'], [{'id': 0x80, 'text': 'Настройки/Settings'}])
+
+    def test_setup_event_list(self):
+        r = decode_message(bytes.fromhex(
+            '801200000FD00D810301050082028182990203129000'))
+        self.assertEqual(r['cmd']['events'], ['Location status', 'Network Rejection'])
+
+    def test_poll_interval_duration(self):
+        r = decode_message(bytes.fromhex(
+            '801200000FD00D8103010300820281820402011E9000'))
+        self.assertEqual(r['cmd']['duration'], 286)
+
+    def test_send_short_message_tpdu(self):
+        r = decode_message(bytes.fromhex(
+            '801200004AD04881030113008202818305000B3B11FF038199F90004A531'
+            '494D45492038363732333130353634323832383020494D53492032353031'
+            '3937373030313932373935204556454E5420319000'))
+        self.assertEqual(r['cmd']['type'], 'SEND SHORT MESSAGE')
+        self.assertEqual(r['cmd']['tpdu']['mti'], 'SMS-SUBMIT')
+        self.assertEqual(r['cmd']['tpdu']['da'], '999')
+
+
+class TestAnnexA(unittest.TestCase):
+    def test_gsm_default(self):
+        from simtrace2_pysniff.server.decode import _decode_annex_a
+        self.assertEqual(_decode_annex_a(b'Alfa Mobile'), 'Alfa Mobile')
+
+    def test_ucs2_variant1(self):
+        from simtrace2_pysniff.server.decode import _decode_annex_a
+        self.assertEqual(_decode_annex_a(b'\x80' + 'Привет'.encode('utf_16_be')), 'Привет')
+
+    def test_ucs2_variant2_base_ptr(self):
+        from simtrace2_pysniff.server.decode import _decode_annex_a
+        # 'Н' = U+041D, base 0x08<<7 = 0x400, offset 0x1D
+        self.assertEqual(_decode_annex_a(bytes.fromhex('8101089D')), 'Н')
+
+
+class TestDcsText(unittest.TestCase):
+    def test_gsm7(self):
+        from simtrace2_pysniff.server.decode import _decode_dcs_text
+        self.assertEqual(_decode_dcs_text(b'\x00Alfa'), 'Alfa')
+
+    def test_ucs2(self):
+        from simtrace2_pysniff.server.decode import _decode_dcs_text
+        self.assertEqual(_decode_dcs_text(b'\x08' + 'OK'.encode('utf_16_be')), 'OK')
+
+    def test_latin1(self):
+        from simtrace2_pysniff.server.decode import _decode_dcs_text
+        self.assertEqual(_decode_dcs_text(b'\x04caf\xe9'), 'café')
 
 
 if __name__ == '__main__':
