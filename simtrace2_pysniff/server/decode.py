@@ -454,8 +454,9 @@ ENVELOPE_TYPES = {
 def parse_tlv(data):
     """Parse a BER-TLV structure into a list of (tag, length, value) tuples.
 
-    Handles single-byte tags and single-byte lengths (< 128), which cover
-    the CAT proactive command and ENVELOPE structures we decode.
+    Handles single-byte tags and both short-form (< 128) and long-form
+    BER-TLV lengths (0x81 NN, 0x82 NN NN).  Indefinite lengths (0x80)
+    and truncated data cause parsing to stop at that point.
     """
     tlvs = []
     i = 0
@@ -468,8 +469,13 @@ def parse_tlv(data):
         length = data[i]
         i += 1
         if length & 0x80:
-            # long form length — not needed for top-level CAT decode
-            break
+            num_len = length & 0x7F
+            if num_len == 0:  # indefinite length — not supported
+                break
+            if i + num_len > n:
+                break
+            length = int.from_bytes(data[i:i + num_len], 'big')
+            i += num_len
         if i + length > n:
             break
         value = data[i:i + length]

@@ -26,6 +26,19 @@ class TestParseTlv(unittest.TestCase):
     def test_empty(self):
         self.assertEqual(parse_tlv(b''), [])
 
+    def test_long_form_length(self):
+        # D0 81 BC … — a proactive command whose length is 0xBC (188),
+        # encoded in BER-TLV long form.
+        inner = bytes.fromhex('8103012500') + b'\x82\x02\x81\x82'
+        data = b'\xd0' + b'\x81' + bytes([len(inner)]) + inner
+        self.assertEqual(parse_tlv(data), [(0xD0, len(inner), inner)])
+
+    def test_long_form_two_byte(self):
+        # 0x82 followed by two length bytes.
+        value = b'\x00' * 300
+        data = b'\x70' + b'\x82\x01\x2c' + value
+        self.assertEqual(parse_tlv(data), [(0x70, 300, value)])
+
 
 class TestAuthenticateNaming(unittest.TestCase):
     def test_ins_88(self):
@@ -420,6 +433,20 @@ class TestProactiveDecode(unittest.TestCase):
         self.assertEqual(r['cmd']['type'], 'SEND SHORT MESSAGE')
         self.assertEqual(r['cmd']['tpdu']['mti'], 'SMS-SUBMIT')
         self.assertEqual(r['cmd']['tpdu']['da'], '999')
+
+    def test_setup_menu_long_form_length(self):
+        # Real Mi A1 startup trace: D0 length encoded as 0x81 0xBC (188 bytes).
+        r = decode_message(bytes.fromhex(
+            '80120000BFD081BC810301250082028182051580004D0065006700610046'
+            '006F006E00500052004F8F100180041C0435043304300424043E043D8F18'
+            '02800420043004370432043B043504470435043D0438044F8F0C03800421'
+            '043F043E044004428F100480041D043E0432043E0441044204388F100580'
+            '04240438043D0430043D0441044B8F1006800421043F044004300432043A'
+            '04308F100780041E043104490435043D043804358F188080041A0430043B'
+            '043504390434043E0441043A043E043F9000'))
+        self.assertEqual(r['cat_command'], 'SET UP MENU')
+        self.assertEqual(r['cmd']['title'], 'MegaFonPRO')
+        self.assertEqual(r['cmd']['items'][0], {'id': 1, 'text': 'МегаФон'})
 
 
 class TestAnnexA(unittest.TestCase):
