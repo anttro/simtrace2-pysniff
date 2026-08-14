@@ -8,3 +8,4 @@ build/
 decode-errors.log
 auth-test.log
 .DS_Store
+tools/

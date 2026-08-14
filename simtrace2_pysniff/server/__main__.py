@@ -25,6 +25,8 @@ def main():
     p = argparse.ArgumentParser(
         prog='simtrace2-pysniff-server',
         description='HTTP API + PWA server for SIMtrace2 APDU capture and analysis')
+    p.add_argument('--host', default='127.0.0.1',
+                   help='HTTP bind address (default: 127.0.0.1)')
     p.add_argument('--port', type=int, default=8081,
                    help='HTTP server port (default: 8081)')
     p.add_argument('--db', default=DEFAULT_DB_PATH,
@@ -51,15 +53,15 @@ def main():
     RequestHandler.capture = capture
     RequestHandler.capture_mode = args.capture
 
-    server = HTTPServer(('127.0.0.1', args.port), RequestHandler)
+    server = HTTPServer((args.host, args.port), RequestHandler)
     server.web_dir = args.web_dir
 
-    print(f'simtrace2-pysniff-server — http://127.0.0.1:{args.port}', file=sys.stderr)
+    print(f'simtrace2-pysniff-server — http://{args.host}:{args.port}', file=sys.stderr)
     print(f'  capture mode: {args.capture}', file=sys.stderr)
     if args.capture == 'gsmtap':
         print(f'  GSMTAP port:  {args.gsmtap_port}', file=sys.stderr)
     print(f'  database:     {args.db}', file=sys.stderr)
-    print(f'  PWA served at http://127.0.0.1:{args.port}/', file=sys.stderr)
+    print(f'  PWA served at http://{args.host}:{args.port}/', file=sys.stderr)
     print(file=sys.stderr)
 
     try:
