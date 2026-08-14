@@ -1152,6 +1152,32 @@ def _decode_ud(ud, udl, dcs, udhi, result):
     return result
 
 
+def _decode_cb_page(value):
+    """Decode a CELL BROADCAST DOWNLOAD CB page (TS 31.111 §8.5 / TS 23.041).
+
+    Layout: serial number (2), message identifier (2), DCS (1), page
+    parameter (1), content (up to 82 octets).  Content is returned as raw
+    hex (no text decode).
+    """
+    if len(value) < 6:
+        return {'content': value.hex().upper()}
+    serial = value[0:2].hex().upper()
+    message_id = value[2:4].hex().upper()
+    dcs = value[4]
+    page_byte = value[5]
+    total_pages = (page_byte >> 4) & 0x0F
+    page_num = page_byte & 0x0F
+    encoding, msg_class = _decode_dcs(dcs)
+    dcs_str = f'0x{dcs:02X} — {encoding}' + (f' (class {msg_class})' if msg_class else '')
+    return {
+        'serial': serial,
+        'message_id': '0x' + message_id,
+        'dcs': dcs_str,
+        'page': f'{page_num}/{total_pages}',
+        'content': value[6:].hex().upper(),
+    }
+
+
 def _decode_envelope(body):
     """Decode an ENVELOPE command body (TS 102 223 / TS 31.111)."""
     tlvs = parse_tlv(body)
@@ -1169,7 +1195,15 @@ def _decode_envelope(body):
                 if v:
                     result['location_status'] = LOCATION_STATUS.get(v[0], f'0x{v[0]:02X}')
             elif t == 0x13:  # Location information
-                result['location_info'] = v.hex().upper()
+                li = _decode_local_info(PLI_LOCATION_INFO, v)
+                result['location_info'] = li['value'] if li else v.hex().upper()
+            elif t in (0x06, 0x86):  # Address (caller's number, MT call)
+                result['caller'] = _decode_bcd_address(v)
+            elif t == 0x1C:  # Transaction identifier (MT call)
+                if v:
+                    result['transaction_id'] = v[0]
+            elif t in (0x08, 0x88):  # Subaddress
+                result['subaddress'] = v.hex().upper()
             elif t == 0x02:  # Device identities
                 result['device_ids'] = v.hex().upper()
     elif tag == 0xD5:  # MO SHORT MESSAGE CONTROL
@@ -1191,12 +1225,12 @@ def _decode_envelope(body):
                 result['tpdu'] = _decode_sm_tpdu(v)
             elif t == 0x02:
                 result['device_ids'] = v.hex().upper()
-    elif tag == 0xD2:  # CELL BROADCAST DOWNLOAD (structure only)
+    elif tag == 0xD2:  # CELL BROADCAST DOWNLOAD
         for t, _l, v in inner:
             if t == 0x02:
                 result['device_ids'] = v.hex().upper()
-            else:
-                result[f'tag_{t:02X}'] = v.hex().upper()
+            elif t in (0x0C, 0x8C):  # CB page
+                result['cb_page'] = _decode_cb_page(v)
     else:  # D3 / D4 / D7 — device identities only
         for t, _l, v in inner:
             if t == 0x02:

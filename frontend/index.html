@@ -537,9 +537,20 @@ function cmdRows(cmd) {
     if (cmd.events) rows.push(['Event', cmd.events.join(', ')]);
     if (cmd.location_status) rows.push(['Location status', cmd.location_status]);
     if (cmd.location_info) rows.push(['Location info', cmd.location_info]);
+    if (cmd.caller) rows.push(['Caller', cmd.caller]);
+    if (cmd.transaction_id !== undefined) rows.push(['Transaction', cmd.transaction_id]);
+    if (cmd.subaddress) rows.push(['Subaddress', cmd.subaddress]);
     if (cmd.smsc) rows.push(['SMSC', cmd.smsc]);
     if (cmd.tp_da) rows.push(['TP-DA', cmd.tp_da]);
     if (cmd.device_ids) rows.push(['Device IDs', cmd.device_ids]);
+    if (cmd.cb_page) {
+        const cb = cmd.cb_page;
+        if (cb.serial) rows.push(['CB serial', cb.serial]);
+        if (cb.message_id) rows.push(['CB message', cb.message_id]);
+        if (cb.dcs) rows.push(['CB DCS', cb.dcs]);
+        if (cb.page) rows.push(['CB page', cb.page]);
+        if (cb.content) rows.push(['CB content', cb.content]);
+    }
 
     // Proactive command fields (FETCH)
     if (cmd.title) rows.push(['Title', cmd.title]);

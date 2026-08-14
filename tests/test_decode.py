@@ -339,6 +339,36 @@ class TestEventDownload(unittest.TestCase):
         self.assertEqual(r['cmd']['events'], ['Location status'])
         self.assertEqual(r['cmd']['location_status'], 'No service')
 
+    def test_location_status_with_info(self):
+        r = decode_message(bytes.fromhex(
+            '80C2000017D615190103020282811B0100130952F02026ADBC51A16F9000'))
+        cmd = r['cmd']
+        self.assertEqual(cmd['location_status'], 'Normal service')
+        self.assertEqual(cmd['location_info'],
+                         'MCC 250 MNC 02 · LAC 0x26AD · Cell 0xBC51A16F')
+
+    def test_mt_call(self):
+        r = decode_message(bytes.fromhex(
+            '80C2000014D612190100020283811C010586069121436587099000'))
+        cmd = r['cmd']
+        self.assertEqual(cmd['events'], ['MT call'])
+        self.assertEqual(cmd['transaction_id'], 5)
+        self.assertEqual(cmd['caller'], '+1234567890')
+
+    def test_cell_broadcast(self):
+        cbp = ('4C511002F211' +
+               '040000313A0103035E047FFB0F31303238322A333036343835363234' +
+               '0D' * 54)
+        r = decode_message(bytes.fromhex(
+            '80C2000060D25E020283810C58' + cbp + '9000'))
+        cmd = r['cmd']
+        self.assertEqual(cmd['type'], 'CELL BROADCAST DOWNLOAD')
+        self.assertEqual(cmd['cb_page']['serial'], '4C51')
+        self.assertEqual(cmd['cb_page']['message_id'], '0x1002')
+        self.assertEqual(cmd['cb_page']['page'], '1/1')
+        self.assertEqual(cmd['cb_page']['content'],
+                         '040000313A0103035E047FFB0F31303238322A333036343835363234' + '0D' * 54)
+
 
 class TestSmTpdu(unittest.TestCase):
     def _bcd(self, number):
