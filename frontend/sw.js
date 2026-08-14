@@ -33,11 +33,13 @@ self.addEventListener('activate', e => {
 self.addEventListener('fetch', e => {
     // Network-first: the local server is always up, so always serve fresh
     // content and fall back to cache only when offline.
+    if (!e.request.url.startsWith('http')) return;
+    if (e.request.method !== 'GET') return;
     e.respondWith(
         fetch(e.request)
             .then(r => {
                 const clone = r.clone();
-                caches.open(CACHE).then(c => c.put(e.request, clone));
+                caches.open(CACHE).then(c => c.put(e.request, clone)).catch(() => {});
                 return r;
             })
             .catch(() => caches.match(e.request))
