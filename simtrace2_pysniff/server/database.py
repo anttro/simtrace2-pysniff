@@ -37,6 +37,11 @@ def _iso_now():
         f'{time.time() % 1 * 1000:03.0f}'
 
 
+def _iso_from_ts(ts):
+    return time.strftime('%Y-%m-%dT%H:%M:%S.', time.localtime(ts)) + \
+        f'{ts % 1 * 1000:03.0f}'
+
+
 class Database:
     def __init__(self, db_path=None):
         if db_path is None:
@@ -62,6 +67,12 @@ class Database:
         self._conn.execute(
             'UPDATE sessions SET ended=? WHERE id=? AND ended IS NULL',
             (_iso_now(), session_id))
+        self._conn.commit()
+
+    def set_session_times_from_ts(self, session_id, first_ts, last_ts):
+        self._conn.execute(
+            'UPDATE sessions SET started=?, ended=? WHERE id=?',
+            (_iso_from_ts(first_ts), _iso_from_ts(last_ts), session_id))
         self._conn.commit()
 
     def rename_session(self, session_id, name):

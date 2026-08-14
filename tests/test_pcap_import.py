@@ -87,6 +87,37 @@ class TestParsePcapng(unittest.TestCase):
         self.assertEqual(list(parse_pcapng(shb + idb + epb)), [])
 
 
+class TestTsresol(unittest.TestCase):
+    def test_nanoseconds_after_padded_option(self):
+        from simtrace2_pysniff.pcap import _parse_tsresol
+        # if_name (code 2, len 2, "lo") then if_tsresol (code 9, len 1, 9), LE.
+        opts = (struct.pack('<HH', 2, 2) + b'lo' + b'\x00\x00' +
+                struct.pack('<HH', 9, 1) + b'\x09' + b'\x00\x00\x00' +
+                struct.pack('<HH', 0, 0))
+        self.assertEqual(_parse_tsresol(opts, '<'), 1e-9)
+
+    def test_default_microseconds(self):
+        from simtrace2_pysniff.pcap import _parse_tsresol
+        self.assertEqual(_parse_tsresol(struct.pack('<HH', 0, 0), '<'), 1e-6)
+
+    def test_parse_pcapng_nanoseconds(self):
+        # IDB with if_tsresol=9 → EPB timestamps in nanoseconds → seconds.
+        shb = _pcapng_block(0x0A0D0D0A, struct.pack('>IHHq', 0x1A2B3C4D, 1, 0, -1))
+        idb = _pcapng_block(0x00000001,
+                            struct.pack('>HHI', LINKTYPE_ETHERNET, 0, 65535) +
+                            struct.pack('>HH', 9, 1) + b'\x09' + b'\x00\x00\x00' +
+                            struct.pack('>HH', 0, 0))
+        # epoch 1600000000.5 s → 1600000000500000000 ns
+        raw = 1600000000500000000
+        ts_hi, ts_lo = raw >> 32, raw & 0xFFFFFFFF
+        frame = wrap_gsmtap(_gsmtap_hdr(GSMTAP_SIM_ATR) + b'\x3b\x04')
+        epb = _pcapng_block(0x00000006,
+                            struct.pack('>IIIII', 0, ts_hi, ts_lo, len(frame), len(frame)) + frame)
+        parsed = list(parse_pcapng(shb + idb + epb))
+        self.assertEqual(len(parsed), 1)
+        self.assertAlmostEqual(parsed[0][0], 1600000000.5, places=6)
+
+
 class TestImportEndpoint(unittest.TestCase):
     def _handler(self, body):
         from simtrace2_pysniff.server.server import RequestHandler
@@ -135,6 +166,32 @@ class TestImportEndpoint(unittest.TestCase):
         self.assertEqual(h._status, 400)
         self.assertIn('No GSMTAP data', h._json['error'])
         self.assertEqual(h.db.count_sessions(), 0)
+
+    def test_import_session_window_from_timestamps(self):
+        from datetime import datetime
+        # Two packets one hour apart in epoch time.
+        t0 = 1600000000.0
+        packets = [
+            (_gsmtap_hdr(GSMTAP_SIM_ATR), b'\x3b\x00', t0),
+            (_gsmtap_hdr(GSMTAP_SIM_APDU), b'\x80\xf2\x00\x00\x00', t0 + 3600.0),
+        ]
+        h, _ = self._handler(build_pcap(packets))
+        h._handle_import_pcap({'name': ['window']})
+        session = h.db.get_session(h._json['session_id'])
+        started = datetime.fromisoformat(session['started'])
+        ended = datetime.fromisoformat(session['ended'])
+        self.assertEqual((ended - started).total_seconds(), 3600.0)
+
+    def test_import_synthetic_ts_falls_back(self):
+        # SPB-style synthetic timestamps (0, 1, …) → keep wall-clock fallback.
+        packets = [
+            (_gsmtap_hdr(GSMTAP_SIM_ATR), b'\x3b\x00', 0.0),
+            (_gsmtap_hdr(GSMTAP_SIM_APDU), b'\x80\xf2\x00\x00\x00', 1.0),
+        ]
+        h, _ = self._handler(build_pcap(packets))
+        h._handle_import_pcap({'name': ['synth']})
+        session = h.db.get_session(h._json['session_id'])
+        self.assertTrue(session['ended'] is not None)
 
 
 class TestVersion(unittest.TestCase):

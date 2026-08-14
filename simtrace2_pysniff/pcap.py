@@ -378,9 +378,9 @@ def _parse_tsresol(options, endian):
         if code == 9 and length == 1:
             b = options[i]
             if b & 0x80:
-                return 10 ** (-(b & 0x7F))
+                return 2 ** (-(b & 0x7F))
             return 10 ** (-b)
-        i += length + (length & 1)  # options are padded to 32-bit
+        i += length + ((-length) % 4)  # options are padded to a 32-bit boundary
     return 1e-6  # default: microseconds
 
 

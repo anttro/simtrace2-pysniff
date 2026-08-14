@@ -322,12 +322,20 @@ class RequestHandler(BaseHTTPRequestHandler):
             self.db.rename_session(session_id, name)
 
         first_ts = packets[0][0]
+        last_ts = packets[-1][0]
         rows = []
         for ts, msg_type, payload in packets:
             elapsed = round(ts - first_ts, 6) if ts is not None else 0.0
             rows.append((max(0.0, elapsed), msg_type, payload, 0))
         self.db.insert_messages(session_id, rows)
-        self.db.close_session(session_id)
+        # Use the packet timestamps as the session window when they are real
+        # (classic pcap / pcapng EPB).  pcapng SPB-only files have synthetic
+        # 0,1,2,… timestamps, so fall back to the import wall-clock time.
+        _REAL_TS_MIN = 946684800  # 2000-01-01
+        if first_ts is not None and first_ts > _REAL_TS_MIN:
+            self.db.set_session_times_from_ts(session_id, first_ts, last_ts)
+        else:
+            self.db.close_session(session_id)
 
         self._send_json({
             'session_id': session_id,
