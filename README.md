@@ -1,7 +1,9 @@
 # simtrace2-pysniff
 
 Python-based replacement for `simtrace2-sniff` — SIM card communication sniffer
-for Osmocom SIMtrace2 hardware (firmware in **trace** mode).
+for Osmocom SIMtrace2 hardware (firmware in **trace** mode).  It bundles the
+**simtrace-analyser** PWA (in [`frontend/`](frontend/)) and an analysis server
+that both captures APDU traffic and serves that PWA.
 
 **Single dependency**: PyUSB (libusb wrapper). No libosmocore, no libosmosim.
 
@@ -59,11 +61,11 @@ OPTIONS can also be set via environment variables:
 FORMAT=timestamp GSMTAP=127.0.0.1 ./sniff-start.sh
 ```
 
-### Analysis server (`simtrace2-pysniff-server`)
+### Analysis server + PWA (`simtrace2-pysniff-server`)
 
-Stores captured APDU traffic in SQLite and serves it over HTTP for the
-[simtrace-analyser](https://github.com/anttro/simtrace-analyser) PWA.
-Two capture modes:
+Stores captured APDU traffic in SQLite and serves it over HTTP, together with
+the bundled **simtrace-analyser** PWA (`frontend/`) on the same origin.  Two
+capture modes:
 
 ```sh
 # Listen for GSMTAP from simtrace2-pysniff (or original simtrace2-sniff):
@@ -73,9 +75,24 @@ simtrace2-pysniff-server --capture gsmtap
 simtrace2-pysniff-server --capture direct
 ```
 
-The PWA then connects to `http://127.0.0.1:8081` for live viewing and
-session management.  See the [simtrace-analyser](https://github.com/anttro/simtrace-analyser)
-repo for the browser interface.
+Then open **http://127.0.0.1:8081/** in a browser — the PWA is served by the
+server, so the UI and the API share an origin and no CORS/Private-Network-Access
+setup is involved.  Use `--web-dir PATH` to serve a different PWA directory
+(default: `<repo>/frontend`).
+
+### Hosted PWA (landing page)
+
+A standalone copy of the PWA is hosted at **https://simtrace.atroshin.ru**.
+It is a pure frontend: point it (Settings → Server URL) at a locally running
+`simtrace2-pysniff-server`.
+
+> **Browser restriction:** when the PWA is served from a public HTTPS host,
+> reaching a local server (`http://127.0.0.1:8081`) requires two things: the
+> server must send `Access-Control-Allow-Private-Network: true` (this server
+> does), and the browser must be allowed to access the local network — in
+> Chrome/Edge/Vivaldi: Site settings → Local network access → allow the site
+> (or accept the permission prompt).  Without the browser permission, the
+> request to `127.0.0.1` is blocked before any preflight is sent.
 
 ### Python module (cross-platform)
 
@@ -183,7 +200,5 @@ Use `--inactivity-timeout` to also trigger reconnect on silent firmware hangs.
 
 ## Related
 
-- **[simtrace-analyser](https://github.com/anttro/simtrace-analyser)** — a
-  browser-based PWA for viewing live captures and browsing/exporting saved
-  sessions. Connects to `simtrace2-pysniff-server`.
-  Try it now: **https://simtrace.atroshin.ru**
+- **[simtrace2](https://gitea.osmocom.org/sim-card/simtrace2)** — the upstream
+  SIMtrace2 hardware/firmware project that this tool sniffs from.

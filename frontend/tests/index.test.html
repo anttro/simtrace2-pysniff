@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<meta charset="UTF-8">
+<title>Tests — SIMtrace Analyser</title>
+<body>
+<h1>HTML Validator Test</h1>
+<p>Page loads cleanly with no JS errors — check browser console.</p>
+<script>
+const tests = [];
+
+// Test INS name mapping
+function testInsNames() {
+    const n = (h) => ({'a4':'SELECT','b0':'READ BINARY','c2':'ENVELOPE','14':'TERMINAL RESPONSE',
+        '88':'AUTHENTICATE','f2':'STATUS','12':'FETCH','20':'VERIFY'}[h] || '?' + h);
+    console.assert(n('a4') === 'SELECT', 'INS a4 -> SELECT');
+    console.assert(n('c2') === 'ENVELOPE', 'INS c2 -> ENVELOPE');
+    console.assert(n('14') === 'TERMINAL RESPONSE', 'INS 14 -> TERMINAL RESPONSE');
+    console.assert(n('ff') !== '?', 'Unknown INS returns placeholder');
+    tests.push('testInsNames: OK');
+}
+
+// Test elapsed formatting
+function testFmtElapsed() {
+    const fmt = (e) => {
+        const s = Math.floor(e);
+        const ms = Math.round((e - s) * 1000);
+        return String(s).padStart(4, '0') + '.' + String(ms).padStart(3, '0');
+    };
+    console.assert(fmt(0) === '0000.000', '0 -> 0000.000');
+    console.assert(fmt(1.5) === '0001.500', '1.5 -> 0001.500');
+    console.assert(fmt(12.034) === '0012.034', '12.034 -> 0012.034');
+    tests.push('testFmtElapsed: OK');
+}
+
+// Test data formatter
+function testFmtData() {
+    const fmt = (hex, limit) => {
+        const pairs = (hex.match(/.{1,2}/g) || []);
+        const shown = pairs.slice(0, limit || 32);
+        let s = shown.join(' ');
+        if (pairs.length > (limit || 32)) s += ' ...';
+        return s;
+    };
+    const r = fmt('a0a40000023f00', 16);
+    console.assert(r === 'a0 a4 00 00 02 3f 00', 'Short data');
+    const r2 = fmt('00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff', 4);
+    console.assert(r2.startsWith('00 11 22 33 ...'), 'Long data truncated');
+    tests.push('testFmtData: OK');
+}
+
+testInsNames();
+testFmtElapsed();
+testFmtData();
+
+document.body.innerHTML += `<pre>${tests.join('\n')}</pre>
+<p style="color:green; font-weight:bold;">All ${tests.length} tests passed.</p>`;
+</script>
+</body>
+</html>

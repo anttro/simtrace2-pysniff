@@ -1,4 +1,4 @@
-"""HTTP API server for simtrace-analyser PWA."""
+"""HTTP API + static PWA server for simtrace2-pysniff."""
 
 import json
 import os
@@ -14,6 +14,23 @@ from .capture import CaptureManager, GsmtapListener, DirectSniffer
 from ..gsmtap import build_gsmtap_packet, GSMTAP_SIM_ATR, GSMTAP_SIM_APDU
 from ..pcap import build_pcap, parse_pcap, parse_pcapng
 from .. import __version__
+
+
+# Static file serving (the PWA lives in <repo>/frontend, served by this server
+# so the UI and the API share an origin and no CORS/PNA is involved).
+_STATIC_MIME = {
+    '.html': 'text/html; charset=utf-8',
+    '.css': 'text/css',
+    '.js': 'application/javascript',
+    '.json': 'application/json',
+    '.png': 'image/png',
+    '.svg': 'image/svg+xml',
+    '.ico': 'image/x-icon',
+    '.webmanifest': 'application/manifest+json',
+    '.map': 'application/json',
+    '.wasm': 'application/wasm',
+}
+_EMBEDDED_MARKER = "<script>window.SIMTRACE_EMBEDDED='1'</script>"
 
 
 def _content_disposition(filename):
@@ -71,6 +88,36 @@ class RequestHandler(BaseHTTPRequestHandler):
         path = parsed.path.rstrip('/')
         return path, parse_qs(parsed.query)
 
+    def _serve_static(self):
+        web_dir = getattr(self.server, 'web_dir', None)
+        if not web_dir:
+            self._send_error(404, 'Not found')
+            return
+        rel = self.path.split('?', 1)[0].lstrip('/')
+        if rel in ('', '/'):
+            rel = 'index.html'
+        if '..' in rel.split('/') or rel.startswith('/'):
+            self._send_error(404, 'Not found')
+            return
+        fs_path = os.path.join(web_dir, rel)
+        if not os.path.isfile(fs_path):
+            self._send_error(404, 'Not found')
+            return
+        with open(fs_path, 'rb') as f:
+            data = f.read()
+        if rel == 'index.html':
+            # Tell the frontend it is served by this server (same origin), so
+            # it can default to a relative API base instead of 127.0.0.1:8081.
+            data = data.replace(b'</head>', _EMBEDDED_MARKER.encode() + b'</head>', 1)
+        content_type = _STATIC_MIME.get(os.path.splitext(rel)[1].lower(), 'application/octet-stream')
+        self.send_response(200)
+        self.send_header('Content-Type', content_type)
+        self.send_header('Content-Length', str(len(data)))
+        if rel in ('index.html', 'sw.js'):
+            self.send_header('Cache-Control', 'no-cache')
+        self.end_headers()
+        self.wfile.write(data)
+
     # --- CORS preflight ---
     def do_OPTIONS(self):
         self.send_response(204)
@@ -110,7 +157,7 @@ class RequestHandler(BaseHTTPRequestHandler):
             msg_id = int(path.split('/')[-1])
             self._handle_get_apdu(msg_id)
         else:
-            self._send_error(404, 'Not found')
+            self._serve_static()
 
     # --- POST ---
     def do_POST(self):

@@ -6,6 +6,7 @@ Usage:
 """
 
 import argparse
+import os
 import sys
 from http.server import HTTPServer
 
@@ -14,10 +15,16 @@ from .database import Database, DEFAULT_DB_PATH
 from .capture import CaptureManager, GsmtapListener, DirectSniffer
 
 
+def _default_web_dir():
+    # <repo>/frontend, whether run from source or an editable install.
+    # __file__ is <repo>/simtrace2_pysniff/server/__main__.py → up three levels.
+    return os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'frontend')
+
+
 def main():
     p = argparse.ArgumentParser(
         prog='simtrace2-pysniff-server',
-        description='HTTP API server for SIMtrace2 APDU capture and analysis')
+        description='HTTP API + PWA server for SIMtrace2 APDU capture and analysis')
     p.add_argument('--port', type=int, default=8081,
                    help='HTTP server port (default: 8081)')
     p.add_argument('--db', default=DEFAULT_DB_PATH,
@@ -26,6 +33,8 @@ def main():
                    help='Capture mode: gsmtap (listen UDP 4729) or direct (SIMtrace2 USB)')
     p.add_argument('--gsmtap-port', type=int, default=4729,
                    help='UDP port for GSMTAP listener (default: 4729)')
+    p.add_argument('--web-dir', default=_default_web_dir(), metavar='PATH',
+                   help='Directory with the simtrace-analyser PWA static files to serve (default: <repo>/frontend)')
     args = p.parse_args()
 
     db = Database(args.db)
@@ -41,12 +50,14 @@ def main():
     RequestHandler.capture = capture
 
     server = HTTPServer(('127.0.0.1', args.port), RequestHandler)
+    server.web_dir = args.web_dir
 
     print(f'simtrace2-pysniff-server — http://127.0.0.1:{args.port}', file=sys.stderr)
     print(f'  capture mode: {args.capture}', file=sys.stderr)
     if args.capture == 'gsmtap':
         print(f'  GSMTAP port:  {args.gsmtap_port}', file=sys.stderr)
     print(f'  database:     {args.db}', file=sys.stderr)
+    print(f'  PWA served at http://127.0.0.1:{args.port}/', file=sys.stderr)
     print(file=sys.stderr)
 
     try:

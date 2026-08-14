@@ -1,0 +1,1451 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SIMtrace Analyser</title>
+<link rel="manifest" href="manifest.json">
+<link rel="icon" type="image/svg+xml" href="sim-analyser.svg">
+<link rel="icon" type="image/png" href="favicon.png">
+<meta name="theme-color" content="#0f172a">
+<style>
+:root, [data-theme="dark"] {
+    --bg: #0f172a;
+    --bg-panel: #1e293b;
+    --bg-input: #334155;
+    --border: #475569;
+    --text: #e2e8f0;
+    --text-muted: #94a3b8;
+    --text-dim: #cbd5e1;
+    --text-faint: #cbd5e1;
+    --accent: #3b82f6;
+    --accent-hover: #2563eb;
+    --accent-bg: #14532d;
+    --warn-bg: #7f1d1d;
+    --warn: #facc15;
+    --warn-hover: #eab308;
+    --error: #f87171;
+    --code-bg: #1e293b;
+    --scrollbar-track: #0f172a;
+    --scrollbar-thumb: #334155;
+    --modal-bg: rgba(0,0,0,0.6);
+    --green: #22c55e;
+    --yellow: #facc15;
+    --link: #94a3b8;
+    --link-hover: #e2e8f0;
+}
+[data-theme="light"] {
+    --bg: #fafafa;
+    --bg-panel: #e5e7eb;
+    --bg-input: #ffffff;
+    --border: #d1d5db;
+    --text: #1f2937;
+    --text-muted: #6b7280;
+    --text-dim: #4b5563;
+    --text-faint: #374151;
+    --accent: #2563eb;
+    --accent-hover: #1d4ed8;
+    --accent-bg: #dcfce7;
+    --warn-bg: #fee2e2;
+    --warn: #f59e0b;
+    --warn-hover: #d97706;
+    --error: #dc2626;
+    --code-bg: #f3f4f6;
+    --scrollbar-track: #fafafa;
+    --scrollbar-thumb: #d1d5db;
+    --modal-bg: rgba(0,0,0,0.4);
+    --green: #16a34a;
+    --yellow: #ca8a04;
+    --link: #6b7280;
+    --link-hover: #1f2937;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font: 14px/1.5 system-ui, sans-serif; background: var(--bg); color: var(--text); display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+
+/* Header */
+.header { display: flex; background: var(--bg-panel); border-bottom: 1px solid var(--border); }
+.header-tabs { display: flex; gap: 4px; padding: 8px 16px 0 16px; align-items: flex-end; }
+.header-tab { padding: 6px 16px; cursor: pointer; color: var(--text-muted); background: var(--bg-input); border-radius: 6px 6px 0 0; font-size: 14px; }
+.header-tab:hover { background: var(--border); }
+.header-tab.active { background: var(--accent); color: #fff; }
+.header-title { margin: 0 auto; display: flex; align-items: center; gap: 6px; color: var(--text); font-weight: 600; font-size: 14px; white-space: nowrap; }
+.header-title .pwa-version { color: var(--text-muted); font-size: 11px; font-weight: 400; }
+.header-title a { color: var(--accent); text-decoration: none; }
+.header-title a:hover { text-decoration: underline; }
+.header-right { margin-left: auto; display: flex; align-items: center; gap: 12px; padding: 8px 16px; }
+.header-right a { color: var(--link); text-decoration: none; font-size: 13px; }
+.header-right a:hover { color: var(--link-hover); }
+.header-right button { padding: 4px 10px; font-size: 14px; cursor: pointer; background: var(--bg-input); border: 1px solid var(--border); border-radius: 4px; color: var(--text); }
+.header-right button:hover { background: var(--accent); color: #fff; }
+
+/* Panels */
+.panel { flex: 1; display: none; flex-direction: column; overflow: hidden; }
+.panel.active { display: flex; }
+
+/* Trace view */
+.trace-topbar { display: flex; gap: 12px; padding: 12px 16px; background: var(--bg-panel); align-items: center; flex-shrink: 0; }
+.trace-topbar input { flex: 1; padding: 8px 12px; background: var(--bg-input); border: 1px solid var(--border); border-radius: 4px; color: var(--text); }
+.trace-topbar input::placeholder { color: var(--text-muted); }
+.trace-topbar select { padding: 8px 12px; background: var(--bg-input); border: 1px solid var(--border); border-radius: 4px; color: var(--text); }
+.trace-topbar button { padding: 8px 16px; background: var(--accent); color: #fff; border: none; border-radius: 4px; cursor: pointer; font-weight: 600; }
+.trace-topbar button:hover { background: var(--accent-hover); }
+.trace-topbar button.stop { background: var(--bg-input); }
+.trace-topbar button.stop:hover { background: var(--bg-panel); }
+.trace-topbar button.connect { background: var(--warn); color: #0f172a; }
+.trace-topbar button.connect:hover { background: var(--warn-hover); }
+.trace-main { display: flex; flex: 1; overflow: hidden; }
+.trace-left { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+
+/* APDU list */
+.apdu-list { flex: 1; overflow-y: auto; padding: 8px; }
+.apdu-entry { display: flex; gap: 12px; padding: 3px 12px; border-bottom: 1px solid var(--bg-panel); cursor: pointer; align-items: baseline; }
+.apdu-entry:hover { background: var(--bg-panel); }
+.apdu-entry.selected { background: var(--bg-input); }
+.apdu-time { color: var(--text-muted); font-family: monospace; white-space: nowrap; min-width: 80px; }
+.apdu-type { color: var(--text); font-weight: 600; min-width: 150px; }
+.apdu-type.atr { color: var(--green); }
+.apdu-type.pps { color: var(--yellow); }
+.apdu-data { font-family: monospace; color: var(--text-dim); word-break: break-all; flex: 1; }
+
+/* APDU detail panel */
+.apdu-detail { display: flex; flex-direction: column; max-height: 40%; overflow-y: auto; border-top: 2px solid var(--accent); background: var(--bg-panel); flex-shrink: 0; }
+.apdu-detail .detail-empty { padding: 24px; color: var(--text-muted); text-align: center; }
+.detail-header { display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; background: var(--bg-input); border-bottom: 1px solid var(--border); }
+.detail-header strong { font-size: 13px; }
+.detail-body { padding: 8px 12px; font-family: monospace; font-size: 12px; line-height: 1.6; }
+.detail-body table { width: 100%; border-collapse: collapse; }
+.detail-body td { padding: 1px 8px; vertical-align: top; }
+.detail-body td.label { color: var(--text-muted); white-space: nowrap; width: 80px; }
+.detail-body td.value { color: var(--text); }
+.detail-body td.hex { color: var(--text-dim); word-break: break-all; }
+.detail-body td.name { color: var(--accent); font-weight: 600; }
+
+/* Side panel */
+.side-panel { width: 260px; background: var(--bg-panel); padding: 12px; overflow-y: auto; flex-shrink: 0; border-left: 1px solid var(--bg-input); }
+.side-panel h3 { color: var(--accent); margin-bottom: 8px; font-size: 13px; text-transform: uppercase; letter-spacing: 1px; }
+.side-item { display: flex; justify-content: space-between; padding: 3px 8px; cursor: pointer; border-radius: 4px; font-size: 13px; }
+.side-item:hover { background: var(--bg-input); }
+.side-item .count { color: var(--accent); font-weight: 600; }
+
+/* Status bar */
+.status-bar { display: flex; padding: 8px 16px; background: var(--bg-panel); border-top: 1px solid var(--bg-input); font-size: 13px; gap: 16px; flex-shrink: 0; }
+.status-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
+.status-dot.live { background: var(--green); }
+.status-dot.paused { background: var(--yellow); }
+.status-dot.off { background: var(--text-muted); }
+
+/* Sessions */
+.sessions-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; padding: 16px; overflow-y: auto; }
+.sessions-header { display: flex; justify-content: space-between; align-items: center; padding: 12px 16px 0; gap: 12px; }
+.sessions-header .sessions-stats { color: var(--text-muted); font-size: 13px; }
+.sessions-header .import-msg { margin-left: auto; font-size: 13px; color: var(--text-muted); }
+.sessions-header .import-msg.error { color: var(--error); }
+.sessions-header button { padding: 8px 16px; background: var(--accent); color: #fff; border: none; border-radius: 4px; cursor: pointer; font-weight: 600; }
+.sessions-header button:hover { background: var(--accent-hover); }
+.session-card { background: var(--bg-panel); border-radius: 8px; padding: 16px; cursor: pointer; border: 1px solid var(--bg-input); }
+.session-card:hover { border-color: var(--accent); }
+.session-name { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.session-name input { flex: 1; padding: 4px 8px; background: var(--bg-input); border: 1px solid var(--border); color: var(--text); border-radius: 4px; font-size: 14px; }
+.session-name input:focus { border-color: var(--accent); outline: none; }
+.session-name .edit-hint { color: var(--text-muted); font-size: 12px; }
+.session-meta { display: flex; gap: 16px; color: var(--text-muted); font-size: 12px; }
+.session-meta span { display: flex; align-items: center; gap: 4px; }
+.session-actions { display: flex; gap: 8px; margin-top: 12px; align-items: center; }
+.session-download { padding: 4px 12px; background: none; border: 1px solid var(--text-muted); color: var(--text-muted); border-radius: 4px; cursor: pointer; text-decoration: none; font-size: 13px; display: inline-block; }
+.session-download:hover { border-color: var(--accent); color: var(--accent); }
+.session-delete { padding: 4px 12px; background: none; border: 1px solid var(--accent); color: var(--accent); border-radius: 4px; cursor: pointer; font-size: 13px; }
+.session-delete:hover { background: var(--accent); color: #fff; }
+
+/* Settings */
+.settings-view { padding: 24px; max-width: 600px; }
+.settings-view label { display: block; margin-bottom: 6px; color: var(--text-muted); }
+.settings-view input { width: 100%; padding: 8px 12px; background: var(--bg-input); border: 1px solid var(--border); color: var(--text); border-radius: 4px; }
+.settings-view input::placeholder { color: var(--text-muted); }
+.settings-url-row { display: flex; gap: 8px; margin-bottom: 16px; }
+.settings-url-row input { flex: 1; margin-bottom: 0; }
+.settings-url-row button { padding: 8px 16px; background: var(--accent); color: #fff; border: none; border-radius: 4px; cursor: pointer; font-weight: 600; white-space: nowrap; }
+.settings-url-row button:hover { background: var(--accent-hover); }
+.settings-url-row button.disconnected { background: var(--bg-input); }
+.settings-view .conn-status { padding: 12px; border-radius: 4px; margin-bottom: 12px; }
+.settings-view .conn-status.connected { background: var(--accent-bg); color: var(--green); }
+.settings-view .conn-status.disconnected { background: var(--warn-bg); color: var(--error); }
+.conn-hint { font-size: 12px; color: var(--text-muted); margin: 8px 0 0; line-height: 1.5; }
+.version-warn { font-size: 12px; color: var(--warn); margin: 8px 0 0; line-height: 1.5; }
+.version-warn:empty { display: none; }
+.conn-instructions { margin-top: 16px; font-size: 13px; color: var(--text-faint); line-height: 1.7; }
+.conn-instructions h3 { color: var(--accent); margin-bottom: 8px; font-size: 14px; }
+.conn-instructions ol { padding-left: 20px; }
+.conn-instructions li { margin-bottom: 8px; }
+.conn-instructions code { background: var(--code-bg); padding: 2px 6px; border-radius: 3px; font-size: 12px; }
+.conn-instructions p { margin-top: 12px; }
+
+/* Empty state */
+.empty-state { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: var(--text-muted); gap: 16px; }
+.empty-state button { padding: 12px 24px; background: var(--accent); color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 16px; }
+
+/* Modal */
+.modal-overlay { display: none; position: fixed; inset: 0; background: var(--modal-bg); z-index: 100; align-items: center; justify-content: center; }
+.modal-overlay.show { display: flex; }
+.modal { background: var(--bg-panel); border-radius: 8px; padding: 24px; max-width: 400px; width: 90%; }
+.modal h3 { margin-bottom: 12px; color: var(--accent); }
+.modal p { color: var(--text-faint); margin-bottom: 16px; }
+.modal-buttons { display: flex; gap: 8px; justify-content: flex-end; }
+.modal-buttons button { padding: 8px 16px; border: none; border-radius: 4px; cursor: pointer; }
+.modal-buttons .confirm { background: var(--accent); color: #fff; }
+.modal-buttons .cancel { background: var(--bg-input); color: var(--text-faint); }
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: var(--scrollbar-track); }
+::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); border-radius: 3px; }
+</style>
+</head>
+<body>
+
+<div class="header">
+    <div class="header-tabs">
+        <div class="header-tab active" data-tab="trace" data-l10n="Trace">Trace</div>
+        <div class="header-tab" data-tab="sessions" data-l10n="Sessions">Sessions</div>
+        <div class="header-tab" data-tab="settings" data-l10n="Settings">Settings</div>
+    </div>
+    <div class="header-title">SIM-ME <a href="https://osmocom.org/projects/baseband/wiki/GSMTAP" target="_blank" rel="noopener">GSMTAP</a> <span data-l10n="trace analyser">trace analyser</span> <span class="pwa-version" id="pwa-version"></span></div>
+    <div class="header-right">
+        <button id="install-btn" data-l10n="Install PWA">Install PWA</button>
+        <a href="https://github.com/anttro/simtrace2-pysniff" target="_blank" rel="noopener">GitHub</a>
+        <button id="lang-btn" onclick="toggleLang()" title="Language / Язык">EN</button>
+        <button id="theme-btn" onclick="toggleTheme()">☀️</button>
+    </div>
+</div><!-- Trace Panel -->
+<div class="panel active" id="panel-trace">
+    <div class="trace-topbar">
+        <input type="text" id="search-input" data-l10n="Search hex bytes..." placeholder="Search hex bytes..." autocomplete="off">
+        <select id="filter-select">
+            <option value="" data-l10n="All commands">All commands</option>
+        </select>
+        <button id="capture-btn" data-l10n="Start Capture">Start Capture</button>
+        <span id="session-name-display" style="display:none; color:var(--text-muted); font-size:15px;"></span>
+    </div>
+    <div class="trace-main">
+        <div class="trace-left">
+            <div class="apdu-list" id="apdu-list"></div>
+            <div class="apdu-detail" id="apdu-detail">
+                <div class="detail-empty" data-l10n="Click an APDU to see details">Click an APDU to see details</div>
+            </div>
+        </div>
+        <div class="side-panel" id="side-panel">
+            <h3 data-l10n="Command Stats">Command Stats</h3>
+            <div id="type-counts">—</div>
+        </div>
+    </div>
+    <div class="status-bar">
+        <span><span class="status-dot off" id="status-dot"></span><span id="status-text" data-l10n="Not connected">Not connected</span></span>
+        <span id="msg-count" style="color:var(--text-muted);">0 messages</span>
+    </div>
+</div>
+
+<!-- Sessions Panel -->
+<div class="panel" id="panel-sessions">
+    <div class="sessions-header">
+        <span class="sessions-stats" id="sessions-stats"></span>
+        <span class="import-msg" id="import-msg"></span>
+        <button id="import-pcap-btn" data-l10n="Import PCAP">Import PCAP</button>
+        <button id="new-capture-btn" data-l10n="New capture">New capture</button>
+        <input type="file" id="import-pcap-file" accept=".pcap,.pcapng,.cap" style="display:none;">
+    </div>
+    <div class="sessions-grid" id="sessions-grid">
+        <div class="empty-state" style="height:auto; padding:40px;">
+            <p data-l10n="No saved sessions">No saved sessions</p>
+            <p style="font-size:12px;" data-l10n="Start a capture from the Trace tab to create sessions.">Start a capture from the Trace tab to create sessions.</p>
+        </div>
+    </div>
+</div>
+
+<!-- Settings Panel -->
+<div class="panel" id="panel-settings">
+    <div class="settings-view">
+        <label for="server-url" data-l10n="Server URL">Server URL</label>
+        <div class="settings-url-row">
+            <input type="text" id="server-url" value="http://127.0.0.1:8081" placeholder="http://127.0.0.1:8081">
+            <button id="connect-btn" data-l10n="Connect">Connect</button>
+        </div>
+        <div class="conn-status disconnected" id="conn-status">
+            ⬤ Not connected — ensure the server is running on the URL above
+        </div>
+        <div class="version-warn" id="version-warn"></div>
+        <div class="conn-hint" id="conn-hint"></div>
+        <div class="conn-instructions" id="conn-instructions"></div>
+    </div>
+</div>
+
+<!-- Delete confirmation modal -->
+<div class="modal-overlay" id="delete-modal">
+    <div class="modal">
+        <h3 data-l10n="Delete Session">Delete Session</h3>
+        <p><span data-l10n="Delete">Delete</span> <strong id="delete-session-name"></strong> <span data-l10n="and all its APDU data? This cannot be undone.">and all its APDU data? This cannot be undone.</span></p>
+        <div class="modal-buttons">
+            <button class="cancel" id="delete-cancel" data-l10n="Cancel">Cancel</button>
+            <button class="confirm" id="delete-confirm" data-l10n="Delete">Delete</button>
+        </div>
+    </div>
+</div>
+
+<script>
+// ──────────────────── Service worker ────────────────────
+if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('sw.js').then(reg => {
+        console.log('SW registered, scope:', reg.scope);
+    }).catch(err => {
+        console.error('SW registration failed:', err);
+    });
+}
+
+// ──────────────────── State ────────────────────
+const STATE = {
+    serverUrl: window.SIMTRACE_EMBEDDED ? '' : (localStorage.getItem('serverUrl') || 'http://127.0.0.1:8081'),
+    activeTab: 'trace',
+    captureActive: false,
+    currentSessionId: null,
+    currentSessionName: null,
+    sessionViewId: null,
+    livePoller: null,
+    messages: [],
+    typeCounts: [],
+    pendingDeleteId: null,
+    serverAvailable: false,
+};
+
+const API_BASE = () => STATE.serverUrl;
+
+const INS_NAMES = {
+    'a4': 'SELECT', 'a0': 'SELECT', '70': 'MANAGE CHANNEL',
+    'b0': 'READ BINARY', 'b1': 'READ RECORD',
+    'd6': 'UPDATE BINARY', 'dc': 'UPDATE RECORD',
+    'c0': 'GET RESPONSE', 'c2': 'ENVELOPE',
+    '20': 'VERIFY', '21': 'VERIFY',
+    '88': 'AUTHENTICATE', '89': 'AUTHENTICATE',
+    '82': 'EXTERNAL AUTHENTICATE',
+    '84': 'GET CHALLENGE',
+    'f2': 'STATUS',
+    '14': 'TERMINAL RESPONSE',
+    '12': 'FETCH',
+    'e2': 'APPEND RECORD',
+    '32': 'INCREASE',
+    '04': 'DEACTIVATE FILE',
+    '44': 'ACTIVATE FILE',
+};
+
+// ──────────────────── UI Helpers ────────────────────
+function ins_label(msg) {
+    if (msg.decoded && msg.decoded.cat_command) return msg.decoded.cat_command;
+    if (msg.decoded && msg.decoded.ins_name) return msg.decoded.ins_name;
+    if (msg.type === 'atr') return 'ATR';
+    if (msg.type === 'pps') return 'PPS';
+    if (msg.type === 'change') return 'STATE CHANGE';
+    if (msg.type === 'fidi') return 'FIDI';
+    const d = msg.data;
+    if (d && d.length >= 2) {
+        const ins = d.slice(2, 4);
+        return INS_NAMES[ins.toLowerCase()] || '0x' + ins.toUpperCase();
+    }
+    return 'TPDU';
+}
+
+function _fallback_label(msg) {
+    if (msg.type === 'atr') return 'ATR';
+    if (msg.type === 'pps') return 'PPS';
+    if (msg.type === 'change') return 'STATE CHANGE';
+    if (msg.type === 'fidi') return 'FIDI';
+    const data = msg.data;
+    if (data && data.length >= 2) {
+        const ins = data.slice(2, 4);
+        return INS_NAMES[ins.toLowerCase()] || '0x' + ins.toUpperCase();
+    }
+    return 'TPDU';
+}
+
+function stat_label(msg) {
+    const d = msg.decoded;
+    if (d) {
+        if (d.ins_name === 'ENVELOPE') return 'ENVELOPE';
+        if (d.cat_command) {
+            if (d.cat_command.startsWith('PROVIDE LOCAL INFORMATION')) return 'PROVIDE LOCAL INFORMATION';
+            return d.cat_command;
+        }
+        if (d.ins_name) return d.ins_name;
+    }
+    return _fallback_label(msg);
+}
+
+function filter_label(msg) {
+    const d = msg.decoded;
+    if (d) {
+        if (d.ins_name === 'ENVELOPE') return 'ENVELOPE';
+        if (d.ins_name === 'FETCH' || d.ins_name === 'TERMINAL RESPONSE') return 'FETCH: ANY PROACTIVE';
+        if (d.ins_name) return d.ins_name;
+    }
+    return _fallback_label(msg);
+}
+
+function fmt_elapsed(e) {
+    const s = Math.floor(e);
+    const ms = Math.round((e - s) * 1000);
+    return `${String(s).padStart(4, '0')}.${String(ms).padStart(3, '0')}`;
+}
+
+function fmt_data(hex, limit) {
+    limit = limit || 32;
+    const pairs = (hex || '').match(/.{1,2}/g) || [];
+    const shown = pairs.slice(0, limit);
+    let s = shown.join(' ');
+    if (pairs.length > limit) s += ' ...';
+    return s.toUpperCase();
+}
+
+function hx(n, len) {
+    len = len || 2;
+    return n.toString(16).toUpperCase().padStart(len, '0');
+}
+
+function fmtSize(bytes) {
+    if (bytes == null) return '?';
+    if (bytes < 1024) return bytes + ' B';
+    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+    if (bytes < 1024 * 1024 * 1024) return (bytes / 1024 / 1024).toFixed(1) + ' MB';
+    return (bytes / 1024 / 1024 / 1024).toFixed(2) + ' GB';
+}
+
+function data_text(m) {
+    if (m.type === 'change' && m.decoded && Array.isArray(m.decoded.flags)) {
+        return m.decoded.flags.join(', ');
+    }
+    return fmt_data(m.data);
+}
+
+// ──────────────────── API ────────────────────
+const API = {
+    async _fetch(method, path, body) {
+        const opts = { method, headers: {} };
+        if (body) {
+            opts.headers['Content-Type'] = 'application/json';
+            opts.body = JSON.stringify(body);
+        }
+        try {
+            const res = await fetch(API_BASE() + path, opts);
+            return await res.json();
+        } catch (e) {
+            STATE.serverAvailable = false;
+            updateCaptureButton();
+            throw e;
+        }
+    },
+    status()        { return this._fetch('GET', '/api/status'); },
+    listSessions()  { return this._fetch('GET', '/api/sessions'); },
+    getSession(id, offset)  { return this._fetch('GET', `/api/sessions/${id}?offset=${offset || 0}&limit=500`); },
+    renameSession(id, name) { return this._fetch('PATCH', `/api/sessions/${id}/name`, { name }); },
+    deleteSession(id)       { return this._fetch('DELETE', `/api/sessions/${id}`); },
+    startCapture()          { return this._fetch('POST', '/api/capture/start'); },
+    stopCapture()           { return this._fetch('POST', '/api/capture/stop'); },
+    getLatest(after)        { return this._fetch('GET', `/api/capture/latest?after=${after}`); },
+    searchMessages(sessionId, query) { return this._fetch('GET', `/api/apdu/search?session_id=${sessionId}&q=${encodeURIComponent(query)}`); },
+    filterMessages(sessionId, type) { return this._fetch('GET', `/api/apdu/filter?session_id=${sessionId}&type=${type}`); },
+    async importPcap(name, bytes) {
+        const res = await fetch(API_BASE() + '/api/sessions/import?name=' + encodeURIComponent(name), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/octet-stream' },
+            body: bytes,
+        });
+        const data = await res.json();
+        if (!res.ok) throw Object.assign(new Error(data.error || 'Import failed'), { status: res.status });
+        return data;
+    },
+};
+
+// ──────────────────── UI Helpers ────────────────────
+function el(id) { return document.getElementById(id); }
+function $on(id, ev, fn) { el(id).addEventListener(ev, fn); }
+
+function responseRows(resp) {
+    if (!resp) return '';
+    const rows = [];
+    const fd = resp.file_descriptor;
+    if (fd) {
+        rows.push(['File type', fd.file_type]);
+        if (fd.structure) rows.push(['Structure', fd.structure]);
+        rows.push(['Shareable', fd.shareable]);
+        if (fd.data_coding) rows.push(['Data coding', fd.data_coding]);
+        if (fd.record_length != null) rows.push(['Record length', fd.record_length]);
+        if (fd.num_records != null) rows.push(['Records', fd.num_records]);
+    }
+    if (resp.file_id) rows.push(['File ID', resp.file_id + (resp.file_id_name ? ' (' + resp.file_id_name + ')' : '')]);
+    if (resp.df_name) rows.push(['DF name', resp.df_name]);
+    if (resp.sfi) rows.push(['SFI', resp.sfi]);
+    if (resp.life_cycle) rows.push(['Life cycle', resp.life_cycle]);
+    if (resp.short_ef_id) rows.push(['Short EF ID', resp.short_ef_id]);
+
+    if (resp.type === 'GSM' || resp.type === '3G') {
+        rows.push(['Auth', resp.type + (resp.status ? ' (' + resp.status + ')' : '')]);
+        if (resp.sres) rows.push(['SRES', resp.sres]);
+        if (resp.res) rows.push(['RES', resp.res]);
+        if (resp.ck) rows.push(['CK', resp.ck]);
+        if (resp.ik) rows.push(['IK', resp.ik]);
+        if (resp.kc) rows.push(['Kc', resp.kc]);
+        if (resp.auts) rows.push(['AUTS', resp.auts]);
+    }
+
+    if (resp.code !== undefined) {
+        rows.push(['Result', resp.code + (resp.name ? ' — ' + resp.name : '')]);
+    }
+    if (resp.duration !== undefined) {
+        rows.push(['Duration', resp.duration + ' s']);
+    }
+    if (resp.item_identifier !== undefined) {
+        rows.push(['Item', resp.item_identifier]);
+    }
+    if (resp.local_info) {
+        for (const [k, v] of Object.entries(resp.local_info)) {
+            rows.push([k, v]);
+        }
+    }
+
+    if (!rows.length) return '';
+    return `<tr><td class="label" colspan="2" style="padding-top:6px; border-top:1px solid var(--border);">Response</td></tr>` +
+        rows.map(([l, v]) => `<tr><td class="label">${l}</td><td class="value">${v}</td></tr>`).join('');
+}
+
+function cmdRows(cmd) {
+    if (!cmd) return '';
+    const rows = [];
+
+    // AUTHENTICATE command body
+    if (cmd.context !== undefined) {
+        rows.push(['Auth context', cmd.context]);
+        if (cmd.rand) rows.push(['RAND', cmd.rand]);
+        if (cmd.autn) rows.push(['AUTN', cmd.autn]);
+    }
+
+    // ENVELOPE fields
+    if (cmd.events) rows.push(['Event', cmd.events.join(', ')]);
+    if (cmd.location_status) rows.push(['Location status', cmd.location_status]);
+    if (cmd.location_info) rows.push(['Location info', cmd.location_info]);
+    if (cmd.smsc) rows.push(['SMSC', cmd.smsc]);
+    if (cmd.tp_da) rows.push(['TP-DA', cmd.tp_da]);
+    if (cmd.device_ids) rows.push(['Device IDs', cmd.device_ids]);
+
+    // Proactive command fields (FETCH)
+    if (cmd.title) rows.push(['Title', cmd.title]);
+    if (cmd.text !== undefined) rows.push(['Text', cmd.text]);
+    if (cmd.items) {
+        for (const it of cmd.items) {
+            rows.push(['Item ' + (it.id !== undefined ? '0x' + hx(it.id, 2) : '?'), it.text]);
+        }
+    }
+    if (cmd.duration !== undefined) rows.push(['Duration', cmd.duration + ' s']);
+    if (cmd.address) rows.push(['Address', cmd.address]);
+    if (cmd.response_length) rows.push(['Response length', cmd.response_length.min + '…' + cmd.response_length.max]);
+
+    // SM TPDU (nested in SMS-PP download / SEND SHORT MESSAGE)
+    const t = cmd.tpdu;
+    if (t) {
+        rows.push(['SMS TPDU', t.mti]);
+        if (t.oa) rows.push(['Originating addr', t.oa]);
+        if (t.da) rows.push(['Destination addr', t.da]);
+        if (t.mr !== undefined) rows.push(['Message ref', '0x' + hx(t.mr, 2)]);
+        if (t.pid !== undefined) rows.push(['PID', '0x' + hx(t.pid, 2) + (t.pid_name ? ' — ' + t.pid_name : '')]);
+        if (t.dcs !== undefined) rows.push(['DCS', '0x' + hx(t.dcs, 2) + ' — ' + t.encoding + (t.msg_class ? ' (class ' + t.msg_class + ')' : '')]);
+        if (t.text !== undefined) rows.push(['Text', t.text]);
+        if (t.payload) rows.push(['Payload', t.payload]);
+        if (t.udh) rows.push(['UDH', t.udh]);
+    }
+
+    if (!rows.length) return '';
+    return `<tr><td class="label" colspan="2" style="padding-top:6px; border-top:1px solid var(--border);">Command</td></tr>` +
+        rows.map(([l, v]) => `<tr><td class="label">${l}</td><td class="value">${v}</td></tr>`).join('');
+}
+
+function showDetail(msg, entry) {
+    // Highlight clicked entry
+    document.querySelectorAll('.apdu-entry.selected').forEach(e => e.classList.remove('selected'));
+    if (entry) entry.classList.add('selected');
+
+    const d = el('apdu-detail');
+    const decoded = msg.decoded;
+
+    if (!decoded) {
+        d.innerHTML = `<div class="detail-header"><strong>${ins_label(msg)}</strong><span style="color:var(--text-muted)">${fmt_elapsed(msg.elapsed)}</span></div>
+            <div class="detail-body" style="color:var(--text-muted);">No decoded data available for this message type.</div>`;
+        return;
+    }
+
+    if (decoded.type === 'change') {
+        d.innerHTML = `<div class="detail-header"><strong>State Change</strong><span style="color:var(--text-muted)">${fmt_elapsed(msg.elapsed)}</span></div>
+            <div class="detail-body">
+                <table>
+                    <tr><td class="label">Flags</td><td class="value">${decoded.flags.join(', ') || 'no changes'}</td></tr>
+                </table>
+            </div>`;
+        return;
+    }
+
+    if (decoded.type === 'fidi') {
+        d.innerHTML = `<div class="detail-header"><strong>Fi/Di Change</strong><span style="color:var(--text-muted)">${fmt_elapsed(msg.elapsed)}</span></div>
+            <div class="detail-body">
+                <table>
+                    <tr><td class="label">Fi</td><td class="value">${decoded.fi_val} (index ${decoded.fi})</td></tr>
+                    <tr><td class="label">Di</td><td class="value">${decoded.di_val} (index ${decoded.di})</td></tr>
+                    <tr><td class="label">Raw</td><td class="hex">0x${(decoded.fidi || '').toUpperCase()}</td></tr>
+                </table>
+            </div>`;
+        return;
+    }
+
+    if (decoded.type === 'atr' || decoded.type === 'pps') {
+        d.innerHTML = `<div class="detail-header"><strong>${decoded.type.toUpperCase()}</strong><span style="color:var(--text-muted)">${fmt_elapsed(msg.elapsed)}</span></div>
+            <div class="detail-body">
+                <table>
+                    <tr><td class="label">Data</td><td class="hex">${(decoded.hex || '').toUpperCase()}</td></tr>
+                </table>
+            </div>`;
+        return;
+    }
+
+    let body = '';
+    if (decoded.body) {
+        const note = decoded.body.note ? ` <span style="color:var(--accent);">${decoded.body.note}</span>` : '';
+        body = `<tr><td class="label">${decoded.body.label || 'Body'}</td><td class="hex">${(decoded.body.hex || '').toUpperCase()}${note}</td></tr>`;
+    }
+
+    let p1p2 = '';
+    if (decoded.p1p2) {
+        p1p2 = `<tr><td class="label">P1-P2</td><td class="value">0x${hx(decoded.p1p2.value, 4)} — ${decoded.p1p2.label}: ${decoded.p1p2.value}</td></tr>`;
+    }
+    let p1 = '';
+    if (decoded.p1) {
+        const n = decoded.p1.name || (decoded.p1.label && decoded.p1.value != null ? `${decoded.p1.label}: ${decoded.p1.value}` : '');
+        p1 = `<tr><td class="label">P1</td><td class="value">0x${(decoded.p1.raw || '').toUpperCase()} — <span class="name">${n}</span></td></tr>`;
+    }
+    let p2 = '';
+    if (decoded.p2) {
+        const n = decoded.p2.name || (decoded.p2.bits ? decoded.p2.bits.join(', ') : '');
+        p2 = `<tr><td class="label">P2</td><td class="value">0x${(decoded.p2.raw || '').toUpperCase()} — <span class="name">${n}</span></td></tr>`;
+    }
+
+    let sw = '';
+    if (decoded.sw) {
+        const sn = decoded.sw.name || '';
+        sw = `<tr><td class="label">SW</td><td class="value">${(decoded.sw.sw1 || '').toUpperCase()} ${(decoded.sw.sw2 || '').toUpperCase()} <span style="color:${sn ? 'var(--accent)' : 'var(--text-muted)'}">${sn}</span></td></tr>`;
+    }
+
+    const cla = decoded.cla;
+    const claInfo = `${cla.interclass}, ch${cla.channel}, ${cla.secure_messaging}, chain: ${cla.chain}`;
+
+    const catRow = decoded.cat_command
+        ? `<tr><td class="label">CAT</td><td class="name">${decoded.cat_command}</td></tr>`
+        : '';
+
+    const respRow = decoded.response_for !== undefined
+        ? `<tr><td class="label">Response for</td><td class="name">${decoded.response_for || 'orphaned'}</td></tr>`
+        : '';
+
+    const trRow = decoded.response_to
+        ? `<tr><td class="label">Responding to</td><td class="name">${decoded.response_to}</td></tr>`
+        : '';
+
+    d.innerHTML = `<div class="detail-header">
+        <strong>${decoded.cat_command || decoded.ins_name}</strong>
+        <span style="color:var(--text-muted)">${fmt_elapsed(msg.elapsed)}</span>
+    </div>
+    <div class="detail-body">
+        <table>
+            <tr><td class="label">CLA</td><td class="value">0x${(cla.hex || '').toUpperCase()} — ${claInfo}</td></tr>
+            <tr><td class="label">INS</td><td class="name">0x${(decoded.ins_hex || '').toUpperCase()} — ${decoded.ins_name}</td></tr>
+            ${catRow}${respRow}${trRow}
+            ${p1p2}${p1}${p2}
+            <tr><td class="label">P3</td><td class="value">0x${hx(decoded.p3, 2)} — ${decoded.p3} bytes</td></tr>
+            ${body}
+            ${cmdRows(decoded.cmd)}
+            ${responseRows(decoded.response)}
+            ${sw}
+        </table>
+    </div>`;
+}
+function buildTypeCounts() {
+    const counts = {};
+    for (const m of STATE.messages) {
+        const lbl = stat_label(m);
+        counts[lbl] = (counts[lbl] || 0) + 1;
+    }
+    STATE.typeCounts = counts;
+}
+
+function renderSidePanel() {
+    const entries = Object.entries(STATE.typeCounts).sort((a, b) => b[1] - a[1]);
+    el('type-counts').innerHTML = entries.map(([k, v], i) =>
+        `<div class="side-item" data-idx="${i}" data-key="${k}">
+            <span>${k}</span><span class="count">${v}</span>
+        </div>`
+    ).join('') || t('No commands');
+}
+
+function populateFilterOptions() {
+    const sel = el('filter-select');
+    const counts = {};
+    for (const m of STATE.messages) {
+        const lbl = filter_label(m);
+        counts[lbl] = (counts[lbl] || 0) + 1;
+    }
+    const keys = Object.keys(counts).sort((a, b) => a.localeCompare(b));
+    const existing = Array.from(sel.options).slice(1).map(o => o.value);
+    if (existing.length === keys.length && existing.every((k, i) => k === keys[i])) return;
+    const cur = sel.value;
+    sel.innerHTML = '<option value="">' + t('All commands') + '</option>' +
+        keys.map(k => `<option value="${escapeHtml(k).replace(/"/g, '&quot;')}">${escapeHtml(k)}</option>`).join('');
+    sel.value = keys.includes(cur) ? cur : '';
+}
+
+function scrollToType(typeKey) {
+    const apduList = el('apdu-list');
+    let targetEl = null;
+    for (const el of apduList.querySelectorAll('.apdu-entry')) {
+        const msgIdx = parseInt(el.dataset.idx);
+        const msg = STATE.messages[msgIdx];
+        if (msg && stat_label(msg) === typeKey) {
+            targetEl = el;
+            break;
+        }
+    }
+    if (targetEl) {
+        targetEl.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        targetEl.classList.add('selected');
+        setTimeout(() => targetEl.classList.remove('selected'), 1500);
+    }
+}
+
+// ──────────────────── Render Trace ────────────────────
+function isOriginalCommand(i) {
+    if (STATE.messages[i].type !== 'tpdu') return false;
+    for (let j = i + 1; j < STATE.messages.length; j++) {
+        if (STATE.messages[j].type !== 'tpdu') continue;
+        const d = STATE.messages[j].decoded;
+        return !!d && d.ins_name === 'GET RESPONSE' && !!d.response_for;
+    }
+    return false;
+}
+
+function matchesFilter(m, i, filterType) {
+    if (!filterType) return true;
+    if (filter_label(m) === filterType) return true;
+    const d = m.decoded;
+    const isGR = m.type === 'tpdu' && d && d.ins_name === 'GET RESPONSE';
+    if (isGR && d.response_for === filterType) return true;
+    if (filterType === 'GET RESPONSE' && isOriginalCommand(i)) return true;
+    return false;
+}
+
+function renderMessages() {
+    const list = el('apdu-list');
+    const searchQ = el('search-input').value.toLowerCase();
+    const filterType = el('filter-select').value;
+
+    const filtered = [];
+    for (let i = 0; i < STATE.messages.length; i++) {
+        const m = STATE.messages[i];
+        if (!matchesFilter(m, i, filterType)) continue;
+        if (searchQ && !m.data.toLowerCase().includes(searchQ)) continue;
+        filtered.push({ m, idx: i });
+    }
+
+    buildTypeCounts();
+    renderSidePanel();
+    populateFilterOptions();
+
+    if (!STATE.captureActive && !STATE.sessionViewId) {
+        list.innerHTML = `<div class="empty-state"><p>${t('No capture active')}</p>
+            <button id="trace-start-btn">${t('Start Capture')}</button></div>`;
+        $('#trace-start-btn', list).addEventListener('click', startCapture);
+        updateStatus();
+        return;
+    }
+
+    list.innerHTML = filtered.map(({ m, idx }) => {
+        const label = ins_label(m);
+        const typeCls = m.type === 'atr' ? 'atr' : m.type === 'pps' ? 'pps' : '';
+        return `<div class="apdu-entry" data-idx="${idx}">
+            <span class="apdu-time">${fmt_elapsed(m.elapsed)}</span>
+            <span class="apdu-type ${typeCls}">${label}</span>
+            <span class="apdu-data">${data_text(m)}</span>
+        </div>`;
+    }).join('');
+
+    list.scrollTop = list.scrollHeight;
+    updateStatus();
+}
+
+function $(selector, root) { return (root || document).querySelector(selector); }
+
+function updateStatus() {
+    const dot = el('status-dot');
+    const text = el('status-text');
+    const count = el('msg-count');
+
+    dot.className = 'status-dot';
+    if (STATE.captureActive) {
+        dot.classList.add('live');
+        text.textContent = t('Live');
+    } else if (STATE.sessionViewId || STATE.currentSessionId) {
+        dot.classList.add('paused');
+        text.textContent = STATE.currentSessionName || t('Session');
+    } else {
+        dot.classList.add('off');
+        text.textContent = t('Not connected');
+    }
+    count.textContent = t('{n} messages').replace('{n}', STATE.messages.length);
+}
+
+// ──────────────────── Live Polling ────────────────────
+let _lastAfter = 0;
+
+function startPolling() {
+    _lastAfter = 0;
+    if (STATE.livePoller) return;
+    STATE.livePoller = setInterval(async () => {
+        try {
+            const data = await API.getLatest(_lastAfter);
+            if (data.active) {
+                STATE.captureActive = true;
+                STATE.currentSessionId = data.session_id;
+            }
+            if (data.messages && data.messages.length > 0) {
+                STATE.messages.push(...data.messages);
+                _lastAfter = data.next_after;
+                renderMessages();
+            }
+            if (!data.active && STATE.captureActive) {
+                STATE.captureActive = false;
+                renderMessages();
+            }
+        } catch (e) {}
+    }, 500);
+}
+
+function stopPolling() {
+    if (STATE.livePoller) {
+        clearInterval(STATE.livePoller);
+        STATE.livePoller = null;
+    }
+}
+
+// ──────────────────── Capture ────────────────────
+async function startCapture() {
+    try {
+        const data = await API.startCapture();
+        STATE.captureActive = true;
+        STATE.currentSessionId = data.session_id;
+        STATE.messages = [];
+        buildTypeCounts();
+        renderSidePanel();
+        renderMessages();
+        updateCaptureButton();
+        startPolling();
+    } catch (e) {
+        alert(t('Failed to start capture: ') + e.message);
+    }
+}
+
+async function stopCapture() {
+    try {
+        await API.stopCapture();
+        STATE.captureActive = false;
+        STATE.sessionViewId = null;
+        updateCaptureButton();
+        updateStatus();
+    } catch (e) {}
+}
+
+function updateCaptureButton() {
+    const btn = el('capture-btn');
+    btn.classList.remove('stop', 'connect');
+    if (STATE.sessionViewId && !STATE.captureActive) {
+        btn.style.display = 'none';
+        return;
+    }
+    btn.style.display = '';
+    if (!STATE.serverAvailable) {
+        btn.textContent = t('Connect to server');
+        btn.classList.add('connect');
+    } else if (STATE.captureActive) {
+        btn.textContent = t('Stop Capture');
+        btn.classList.add('stop');
+    } else {
+        btn.textContent = t('Start Capture');
+    }
+}
+
+// ──────────────────── Sessions ────────────────────
+async function loadSessions() {
+    try {
+        const data = await API.listSessions();
+        const grid = el('sessions-grid');
+
+        const total = data.total_sessions != null ? data.total_sessions : data.sessions.length;
+        const dbSize = data.db_size != null ? fmtSize(data.db_size) : '?';
+        const sessionsLabel = total === 1
+            ? t('{n} session · {size}').replace('{n}', total).replace('{size}', dbSize)
+            : t('{n} session(s) · {size}').replace('{n}', total).replace('{size}', dbSize);
+        el('sessions-stats').textContent = sessionsLabel;
+
+        if (!data.sessions.length) {
+            grid.innerHTML = `<div class="empty-state" style="height:auto; padding:40px;">
+                <p>${t('No saved sessions')}</p>
+            </div>`;
+            return;
+        }
+        grid.innerHTML = data.sessions.map(s => {
+            const name = s.name || t('Session #') + s.id;
+            const dStart = s.started ? s.started.replace('T', ' ') : '?';
+            const duration = s.ended ? formatDuration(s.started, s.ended) : t('active');
+            return `<div class="session-card" data-id="${s.id}">
+                <div class="session-name">
+                    <input type="text" value="${escapeHtml(name)}" data-sid="${s.id}" placeholder="${t('Session name...')}">
+                </div>
+                <div class="session-meta">
+                    <span>${dStart}</span>
+                    <span>${duration}</span>
+                    <span>${s.message_count} ${t('msgs')}</span>
+                    <span>${s.mode}</span>
+                </div>
+                <div class="session-actions">
+                    <a class="session-download" href="${API_BASE()}/api/sessions/${s.id}/pcap">${t('Download PCAP')}</a>
+                    <button class="session-delete" data-sid="${s.id}">${t('Delete')}</button>
+                </div>
+            </div>`;
+        }).join('');
+
+        grid.querySelectorAll('.session-card').forEach(card => {
+            card.addEventListener('click', e => {
+                if (e.target.tagName === 'INPUT' || e.target.tagName === 'BUTTON' || e.target.tagName === 'A') return;
+                loadSession(parseInt(card.dataset.id));
+            });
+        });
+        grid.querySelectorAll('.session-name input').forEach(input => {
+            const originalName = input.value;
+            input.addEventListener('blur', async () => {
+                const sid = parseInt(input.dataset.sid);
+                const name = input.value.trim();
+                try {
+                    await API.renameSession(sid, name);
+                } catch (e) {
+                    input.value = originalName;
+                }
+            });
+            input.addEventListener('keydown', e => {
+                if (e.key === 'Enter') input.blur();
+            });
+        });
+        grid.querySelectorAll('.session-delete').forEach(btn => {
+            btn.addEventListener('click', e => {
+                e.stopPropagation();
+                const sid = parseInt(btn.dataset.sid);
+                showDeleteModal(sid);
+            });
+        });
+    } catch (e) {}
+}
+
+async function importPcapFile(file) {
+    const msg = el('import-msg');
+    msg.classList.remove('error');
+    msg.textContent = t('Importing…');
+    try {
+        const buf = await file.arrayBuffer();
+        const baseName = file.name.replace(/\.[^.]+$/, '') || file.name;
+        const data = await API.importPcap(baseName, buf);
+        msg.textContent = t('Imported \'{name}\' — {n} messages')
+            .replace('{name}', data.name).replace('{n}', data.message_count);
+        loadSessions();
+    } catch (e) {
+        msg.classList.add('error');
+        msg.textContent = t((e && e.message) || 'Import failed');
+    }
+}
+
+async function loadSession(id) {
+    try {
+        // Stop any active capture so it can't write into the session being viewed.
+        await API.stopCapture();
+        STATE.captureActive = false;
+        STATE.currentSessionId = null;
+        stopPolling();
+
+        const data = await API.getSession(id, 0);
+        STATE.sessionViewId = id;
+        STATE.captureActive = false;
+        STATE.currentSessionName = data.session.name || t('Session #') + id;
+        STATE.messages = data.messages;
+        switchTab('trace');
+        updateCaptureButton();
+        renderMessages();
+        el('session-name-display').style.display = 'inline';
+        el('session-name-display').textContent = t('Session: ') + (data.session.name || '#' + id);
+    } catch (e) {
+        alert(t('Failed to load session'));
+    }
+}
+
+function formatDuration(start, end) {
+    if (!start || !end) return '?';
+    const ms = new Date(end) - new Date(start);
+    const s = Math.floor(ms / 1000);
+    if (s < 60) return s + 's';
+    const m = Math.floor(s / 60);
+    return m + 'm ' + (s % 60) + 's';
+}
+
+function escapeHtml(str) {
+    return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function showDeleteModal(id) {
+    STATE.pendingDeleteId = id;
+    const s = document.querySelector(`.session-card[data-id="${id}"] input`);
+    el('delete-session-name').textContent = s ? s.value : t('Session #') + id;
+    el('delete-modal').classList.add('show');
+}
+
+async function confirmDelete() {
+    const id = STATE.pendingDeleteId;
+    if (!id) return;
+    try {
+        await API.deleteSession(id);
+        el('delete-modal').classList.remove('show');
+        STATE.pendingDeleteId = null;
+        loadSessions();
+    } catch (e) {
+        alert(t('Failed to delete session'));
+    }
+}
+
+// ──────────────────── Settings ────────────────────
+let _connTimer = null;
+
+function targetSpace() {
+    let h;
+    try { h = new URL(STATE.serverUrl).hostname.toLowerCase(); } catch (e) { return 'public'; }
+    if (h === 'localhost' || h === '[::1]' || h === '::1' || /^127\./.test(h)) return 'loopback';
+    if (/^10\./.test(h) || /^192\.168\./.test(h) || /^172\.(1[6-9]|2\d|3[01])\./.test(h)) return 'private';
+    return 'public';
+}
+
+function isLikelyBlocked() {
+    const pagePublic = location.protocol === 'https:'
+        || !(location.hostname === 'localhost' || /^127\./.test(location.hostname));
+    const s = targetSpace();
+    return pagePublic && (s === 'loopback' || s === 'private');
+}
+
+function updateVersionWarn(serverVersion) {
+    const elv = el('version-warn');
+    const sv = parseVersion(serverVersion);
+    if (sv === null) {
+        elv.textContent = t('Server version unknown — update simtrace2-pysniff-server.');
+        return;
+    }
+    const cmpMin = compareVersions(serverVersion, MIN_SERVER_VERSION);
+    if (cmpMin !== null && cmpMin < 0) {
+        elv.textContent = t('Server version {v} is outdated. Please update simtrace2-pysniff-server.').replace('{v}', serverVersion);
+        return;
+    }
+    if (sv[0] > parseVersion(PWA_VERSION)[0]) {
+        elv.textContent = t('Server version {v} is newer than expected. Update simtrace2-pysniff for full compatibility.').replace('{v}', serverVersion);
+        return;
+    }
+    elv.textContent = '';
+}
+
+function connectServer() {
+    if (_connTimer) return;
+    _connTimer = setInterval(checkConnection, 5000);
+    checkConnection();
+}
+
+function disconnectServer() {
+    if (_connTimer) {
+        clearInterval(_connTimer);
+        _connTimer = null;
+    }
+    STATE.serverAvailable = false;
+    el('conn-status').textContent = '⬤ ' + t('Disconnected — click Connect to resume');
+    el('conn-status').className = 'conn-status disconnected';
+    el('version-warn').textContent = '';
+    el('conn-hint').textContent = '';
+    el('conn-instructions').innerHTML = '';
+    el('status-dot').className = 'status-dot off';
+    el('status-text').textContent = t('Not connected');
+    const btn = el('connect-btn');
+    btn.textContent = t('Connect');
+    btn.classList.add('disconnected');
+    updateCaptureButton();
+    stopPolling();
+    if (STATE.captureActive) {
+        STATE.captureActive = false;
+        STATE.currentSessionId = null;
+    }
+}
+
+async function checkConnection() {
+    try {
+        const data = await API.status();
+        STATE.serverAvailable = true;
+        el('conn-status').textContent = '⬤ ' + t('Connected') + ' — ' + data.server;
+        el('conn-status').className = 'conn-status connected';
+        updateVersionWarn(data.version);
+        el('conn-hint').textContent = '';
+        el('conn-instructions').innerHTML = '';
+        el('connect-btn').textContent = t('Disconnect');
+        el('connect-btn').classList.remove('disconnected');
+        el('status-dot').className = 'status-dot ' + (data.capture_active ? 'live' : 'paused');
+        el('status-text').textContent = data.capture_active ? t('Capturing') : t('Connected');
+        if (data.capture_active) {
+            STATE.captureActive = true;
+            STATE.currentSessionId = data.session_id;
+        }
+        updateCaptureButton();
+    } catch (e) {
+        STATE.serverAvailable = false;
+        el('conn-status').textContent = '⬤ ' + t('Not connected — ensure the server is running on the URL above');
+        el('conn-status').className = 'conn-status disconnected';
+        el('version-warn').textContent = '';
+        const url = STATE.serverUrl || location.origin;
+        el('conn-hint').textContent = t(isLikelyBlocked() ? HINT_BLOCKED : HINT_UNREACHABLE).replace('{url}', url);
+        el('connect-btn').textContent = t('Connect');
+        el('connect-btn').classList.add('disconnected');
+        el('conn-instructions').innerHTML = `
+            <h3>${t('Setup')}</h3>
+            <ol>
+                <li>${t('Clone and install simtrace2-pysniff:')}<br>
+                    <code>git clone https://github.com/anttro/simtrace2-pysniff.git</code><br>
+                    <code>cd simtrace2-pysniff && pip install -e .</code></li>
+                <li>${t('Start the server in direct mode (recommended):')}<br>
+                    <code>./server-start.sh --capture direct</code><br>
+                    <span style="color:var(--text-muted);">${t('Requires SIMtrace2 hardware connected via USB; captures directly from the device.')}</span></li>
+            </ol>
+            <p style="margin-top:8px;">${t('Then set the URL above to http://127.0.0.1:8081 and return to the Trace tab.')}</p>
+            <h3 style="margin-top:20px;">${t('Alternative: GSMTAP mode')}</h3>
+            <p style="color:var(--text-muted); margin-top:4px;">${t('Use an external sniffer alongside the server. This mode is compatible with the original Osmocom simtrace2-sniff.')}</p>
+            <ol style="margin-top:4px;">
+                <li>${t('Start the server:')}<br>
+                    <code>./server-start.sh --capture gsmtap</code></li>
+                <li>${t('Start a GSMTAP source in another terminal — either:')}<br>
+                    <code>./sniff-start.sh --gsmtap 127.0.0.1</code> &nbsp;(simtrace2-pysniff)<br>
+                    &nbsp;or<br>
+                    <code>simtrace2-sniff --gsmtap-ip 127.0.0.1</code> &nbsp;${t('(original Osmocom tool)')}</li>
+            </ol>`;
+        el('status-dot').className = 'status-dot off';
+        el('status-text').textContent = t('Not connected');
+        updateCaptureButton();
+    }
+}
+
+// ──────────────────── Tabs ────────────────────
+function switchTab(name) {
+    STATE.activeTab = name;
+    document.querySelectorAll('.header-tab').forEach(t => t.classList.toggle('active', t.dataset.tab === name));
+    document.querySelectorAll('.panel').forEach(p => p.classList.toggle('active', p.id === 'panel-' + name));
+    if (name === 'sessions') loadSessions();
+    if (name === 'settings') checkConnection();
+}
+
+// ──────────────────── Search / Filter ────────────────────
+let _searchTimer = null;
+function onSearchChange() {
+    clearTimeout(_searchTimer);
+    _searchTimer = setTimeout(renderMessages, 200);
+}
+
+function onFilterChange() {
+    renderMessages();
+}
+
+// ──────────────────── Versioning ────────────────────
+const PWA_VERSION = '1.1.0';
+const MIN_SERVER_VERSION = '1.0.0';
+
+function parseVersion(v) {
+    const parts = String(v || '').trim().split('.').map(n => parseInt(n, 10));
+    if (parts.length < 2 || parts.some(isNaN)) return null;
+    return parts;
+}
+
+function compareVersions(a, b) {
+    const pa = parseVersion(a);
+    const pb = parseVersion(b);
+    if (pa === null || pb === null) return null;
+    for (let i = 0; i < 3; i++) {
+        const da = pa[i] || 0;
+        const db = pb[i] || 0;
+        if (da !== db) return da < db ? -1 : 1;
+    }
+    return 0;
+}
+
+// ──────────────────── i18n ────────────────────
+let currentLang = 'en';
+
+const HINT_BLOCKED = 'The browser likely blocked access to the local server. Allow local network access for this site (Chrome/Edge/Vivaldi: Site settings → Local network access → Allow) and confirm simtrace2-pysniff-server is running at {url}.';
+const HINT_UNREACHABLE = 'Couldn\'t reach the server. Check that simtrace2-pysniff-server is running and the URL is correct ({url}). If this page is served over HTTPS, also allow local network access in the browser (Site settings → Local network access → Allow).';
+
+const LANG_RU = {
+    'Trace': 'Трассировка',
+    'Sessions': 'Сессии',
+    'Settings': 'Настройки',
+    'trace analyser': 'анализатор трейсов',
+    'Install PWA': 'Установить PWA',
+    'Search hex bytes...': 'Поиск по данным (hex)...',
+    'All commands': 'Все команды',
+    'Start Capture': 'Начать захват',
+    'Stop Capture': 'Остановить захват',
+    'Connect to server': 'Подключиться к серверу',
+    'Click an APDU to see details': 'Нажмите на APDU для просмотра деталей',
+    'Command Stats': 'Статистика команд',
+    'Not connected': 'Не подключено',
+    'Live': 'Захват',
+    'Session': 'Сессия',
+    'Connected': 'Подключено',
+    'Capturing': 'Захват',
+    'No capture active': 'Нет активного захвата',
+    'No commands': 'Нет команд',
+    'No saved sessions': 'Нет сохранённых сессий',
+    'Start a capture from the Trace tab to create sessions.': 'Начните захват на вкладке «Трассировка», чтобы создать сессии.',
+    'Import PCAP': 'Импорт PCAP',
+    'New capture': 'Новый захват',
+    'Server URL': 'URL сервера',
+    'Connect': 'Подключить',
+    'Disconnect': 'Отключить',
+    'Disconnected — click Connect to resume': 'Отключено — нажмите «Подключить», чтобы возобновить',
+    'Not connected — ensure the server is running on the URL above': 'Не подключено — убедитесь, что сервер запущен по указанному URL',
+    'Delete Session': 'Удалить сессию',
+    'Delete': 'Удалить',
+    'and all its APDU data? This cannot be undone.': 'и все данные APDU? Это действие необратимо.',
+    'Cancel': 'Отмена',
+    'Session #': 'Сессия #',
+    'Session: ': 'Сессия: ',
+    'Session name...': 'Имя сессии...',
+    'msgs': 'сообщ.',
+    'active': 'активна',
+    'Download PCAP': 'Скачать PCAP',
+    '{n} messages': '{n} сообщений',
+    '{n} session(s) · {size}': '{n} сессий · {size}',
+    '{n} session · {size}': '{n} сессия · {size}',
+    'Importing…': 'Импорт…',
+    'Import failed': 'Ошибка импорта',
+    'Imported \'{name}\' — {n} messages': 'Импортировано «{name}» — {n} сообщений',
+    'Failed to start capture: ': 'Не удалось начать захват: ',
+    'Failed to load session': 'Не удалось загрузить сессию',
+    'Failed to delete session': 'Не удалось удалить сессию',
+    'No GSMTAP data found in trace': 'В трассировке нет данных GSMTAP',
+    'Empty file': 'Пустой файл',
+    'Install from the address bar:\nclick the install icon (⊕ / monitor icon) at the right\nend of Chrome\'s address bar, then "Install SIMtrace Analyser".':
+        'Установка из адресной строки:\nнажмите значок установки (⊕ / значок монитора) в правом\nконце адресной строки Chrome, затем «Установить SIMtrace Analyser».',
+    [HINT_BLOCKED]: 'Браузер, вероятно, заблокировал доступ к локальному серверу. Разрешите доступ к локальной сети для этого сайта (Chrome/Edge/Vivaldi: Настройки сайта → Доступ к локальной сети → Разрешить) и убедитесь, что simtrace2-pysniff-server запущен по адресу {url}.',
+    [HINT_UNREACHABLE]: 'Не удалось связаться с сервером. Проверьте, что simtrace2-pysniff-server запущен и URL указан верно ({url}). Если эта страница открыта по HTTPS, также разрешите доступ к локальной сети в браузере (Настройки сайта → Доступ к локальной сети → Разрешить).',
+    'Setup': 'Настройка',
+    'Clone and install simtrace2-pysniff:': 'Клонируйте и установите simtrace2-pysniff:',
+    'Start the server in direct mode (recommended):': 'Запустите сервер в режиме direct (рекомендуется):',
+    'Requires SIMtrace2 hardware connected via USB; captures directly from the device.': 'Требуется оборудование SIMtrace2, подключённое по USB; захват выполняется напрямую с устройства.',
+    'Then set the URL above to http://127.0.0.1:8081 and return to the Trace tab.': 'Затем укажите URL выше (http://127.0.0.1:8081) и вернитесь на вкладку «Трассировка».',
+    'Alternative: GSMTAP mode': 'Альтернатива: режим GSMTAP',
+    'Use an external sniffer alongside the server. This mode is compatible with the original Osmocom simtrace2-sniff.': 'Используйте внешний сниффер вместе с сервером. Этот режим совместим с оригинальным инструментом Osmocom simtrace2-sniff.',
+    'Start the server:': 'Запустите сервер:',
+    'Start a GSMTAP source in another terminal — either:': 'Запустите источник GSMTAP в другом терминале — либо:',
+    '(original Osmocom tool)': '(оригинальный инструмент Osmocom)',
+    'Server version unknown — update simtrace2-pysniff-server.': 'Версия сервера неизвестна — обновите simtrace2-pysniff-server.',
+    'Server version {v} is outdated. Please update simtrace2-pysniff-server.': 'Версия сервера {v} устарела. Обновите simtrace2-pysniff-server.',
+    'Server version {v} is newer than expected. Update simtrace2-pysniff for full compatibility.': 'Версия сервера {v} новее ожидаемой. Обновите simtrace2-pysniff для полной совместимости.',
+};
+
+function t(text) {
+    if (currentLang === 'ru' && LANG_RU[text]) return LANG_RU[text];
+    return text;
+}
+
+function translatePage() {
+    document.querySelectorAll('[data-l10n]').forEach(el => {
+        const key = el.getAttribute('data-l10n');
+        if (el.tagName === 'INPUT') {
+            el.placeholder = t(key);
+        } else {
+            el.textContent = t(key);
+        }
+    });
+}
+
+function applyLang() {
+    document.getElementById('lang-btn').textContent = currentLang.toUpperCase();
+}
+
+function toggleLang() {
+    currentLang = currentLang === 'en' ? 'ru' : 'en';
+    localStorage.setItem('lang', currentLang);
+    applyLang();
+    translatePage();
+    updateStatus();
+    updateCaptureButton();
+    renderMessages();
+    loadSessions();
+    checkConnection();
+}
+
+// ──────────────────── Theme ────────────────────
+function applyTheme(theme) {
+    document.documentElement.setAttribute('data-theme', theme);
+    localStorage.setItem('theme', theme);
+    document.getElementById('theme-btn').textContent = theme === 'dark' ? '☀️' : '🌙';
+    document.querySelector('meta[name="theme-color"]').setAttribute(
+        'content', theme === 'dark' ? '#0f172a' : '#fafafa');
+}
+
+function toggleTheme() {
+    const current = document.documentElement.getAttribute('data-theme');
+    applyTheme(current === 'dark' ? 'light' : 'dark');
+}
+
+// ──────────────────── PWA Install ────────────────────
+let _deferredInstallPrompt = null;
+
+function hideInstallBtn() {
+    const btn = document.getElementById('install-btn');
+    if (btn) btn.style.display = 'none';
+}
+
+window.addEventListener('beforeinstallprompt', e => {
+    e.preventDefault();
+    _deferredInstallPrompt = e;
+    console.log('beforeinstallprompt fired — install prompt available');
+});
+
+window.addEventListener('appinstalled', () => {
+    console.log('appinstalled fired');
+    _deferredInstallPrompt = null;
+    hideInstallBtn();
+});
+
+async function promptInstall() {
+    if (_deferredInstallPrompt) {
+        _deferredInstallPrompt.prompt();
+        const choice = await _deferredInstallPrompt.userChoice;
+        console.log('install userChoice:', choice.outcome);
+        if (choice.outcome === 'accepted') {
+            _deferredInstallPrompt = null;
+            hideInstallBtn();
+        }
+        return;
+    }
+    alert(t('Install from the address bar:\nclick the install icon (⊕ / monitor icon) at the right\nend of Chrome\'s address bar, then "Install SIMtrace Analyser".'));
+}
+
+// ──────────────────── Init ────────────────────
+function init() {
+    const saved = localStorage.getItem('theme');
+    if (saved) {
+        applyTheme(saved);
+    } else if (window.matchMedia('(prefers-color-scheme: light)').matches) {
+        applyTheme('light');
+    }
+
+    const userLang = (navigator.language || '').split('-')[0];
+    currentLang = localStorage.getItem('lang') || (userLang === 'ru' ? 'ru' : 'en');
+    applyLang();
+    translatePage();
+
+    el('pwa-version').textContent = 'v' + PWA_VERSION;
+    el('server-url').value = STATE.serverUrl;
+
+    document.querySelectorAll('.header-tab').forEach(tab => {
+        tab.addEventListener('click', () => switchTab(tab.dataset.tab));
+    });
+
+    $on('capture-btn', 'click', () => {
+        if (!STATE.serverAvailable) {
+            switchTab('settings');
+            return;
+        }
+        if (STATE.captureActive) return stopCapture();
+        if (STATE.sessionViewId) {
+            el('session-name-display').style.display = 'none';
+            STATE.sessionViewId = null;
+            STATE.currentSessionName = null;
+            updateCaptureButton();
+        }
+        startCapture();
+    });
+
+    $on('new-capture-btn', 'click', () => {
+        if (!STATE.serverAvailable) {
+            switchTab('settings');
+            return;
+        }
+        if (STATE.captureActive) return stopCapture();
+        el('session-name-display').style.display = 'none';
+        STATE.sessionViewId = null;
+        STATE.currentSessionName = null;
+        updateCaptureButton();
+        switchTab('trace');
+        startCapture();
+    });
+
+    $on('import-pcap-btn', 'click', () => el('import-pcap-file').click());
+    $on('import-pcap-file', 'change', () => {
+        const file = el('import-pcap-file').files[0];
+        if (file) importPcapFile(file);
+        el('import-pcap-file').value = '';
+    });
+
+    $on('search-input', 'input', onSearchChange);
+    $on('filter-select', 'change', onFilterChange);
+
+    $on('server-url', 'change', () => {
+        STATE.serverUrl = el('server-url').value.trim();
+        localStorage.setItem('serverUrl', STATE.serverUrl);
+        checkConnection();
+    });
+
+    $on('connect-btn', 'click', () => {
+        if (STATE.serverAvailable) {
+            disconnectServer();
+        } else {
+            connectServer();
+        }
+    });
+
+    $on('install-btn', 'click', promptInstall);
+
+    $on('delete-cancel', 'click', () => {
+        el('delete-modal').classList.remove('show');
+        STATE.pendingDeleteId = null;
+    });
+    $on('delete-confirm', 'click', confirmDelete);
+
+    el('side-panel').addEventListener('click', e => {
+        const item = e.target.closest('.side-item');
+        if (!item) return;
+        scrollToType(item.dataset.key);
+    });
+
+    connectServer();
+
+    el('apdu-list').addEventListener('click', e => {
+        const entry = e.target.closest('.apdu-entry');
+        if (!entry) return;
+        const idx = parseInt(entry.dataset.idx);
+        const msg = STATE.messages[idx];
+        if (!msg) return;
+        showDetail(msg, entry);
+    });
+
+    updateCaptureButton();
+}
+
+init();
+</script>
+</body>
+</html>

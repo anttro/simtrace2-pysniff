@@ -72,4 +72,5 @@ ARGS+=(--port "$PORT")
 ARGS+=("${EXTRA_ARGS[@]}")
 
 echo "Starting simtrace2-pysniff-server..." >&2
+echo "PWA (simtrace-analyser) will be served at http://127.0.0.1:$PORT/" >&2
 exec env PYTHONPATH="$PROJECT_DIR" python3 -m simtrace2_pysniff.server "${ARGS[@]}"
