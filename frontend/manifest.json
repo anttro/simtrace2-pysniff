@@ -2,7 +2,7 @@
   "name": "SIMtrace Analyser",
   "short_name": "SIMtrace",
   "description": "PWA frontend for browsing SIMtrace2 APDU traces",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "start_url": "index.html",
   "display": "standalone",
   "background_color": "#0f172a",

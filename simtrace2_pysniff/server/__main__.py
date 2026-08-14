@@ -29,8 +29,8 @@ def main():
                    help='HTTP server port (default: 8081)')
     p.add_argument('--db', default=DEFAULT_DB_PATH,
                    help=f'SQLite database path (default: {DEFAULT_DB_PATH})')
-    p.add_argument('--capture', choices=['gsmtap', 'direct'], default='gsmtap',
-                   help='Capture mode: gsmtap (listen UDP 4729) or direct (SIMtrace2 USB)')
+    p.add_argument('--capture', choices=['gsmtap', 'direct', 'disabled'], default='gsmtap',
+                   help='Capture mode: gsmtap (listen UDP 4729), direct (SIMtrace2 USB), or disabled (no capture)')
     p.add_argument('--gsmtap-port', type=int, default=4729,
                    help='UDP port for GSMTAP listener (default: 4729)')
     p.add_argument('--web-dir', default=_default_web_dir(), metavar='PATH',
@@ -39,15 +39,17 @@ def main():
 
     db = Database(args.db)
 
+    capture = None
     if args.capture == 'gsmtap':
         backend = GsmtapListener(bind_port=args.gsmtap_port)
-    else:
+        capture = CaptureManager(backend, db)
+    elif args.capture == 'direct':
         backend = DirectSniffer()
-
-    capture = CaptureManager(backend, db)
+        capture = CaptureManager(backend, db)
 
     RequestHandler.db = db
     RequestHandler.capture = capture
+    RequestHandler.capture_mode = args.capture
 
     server = HTTPServer(('127.0.0.1', args.port), RequestHandler)
     server.web_dir = args.web_dir
@@ -65,7 +67,7 @@ def main():
     except KeyboardInterrupt:
         pass
     finally:
-        if capture.active:
+        if capture and capture.active:
             capture.stop_session()
         server.server_close()
 

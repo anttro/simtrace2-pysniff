@@ -42,6 +42,7 @@ def _content_disposition(filename):
 class RequestHandler(BaseHTTPRequestHandler):
     db: Database = None
     capture: CaptureManager = None
+    capture_mode: str = 'gsmtap'
 
     def log_message(self, fmt, *args):
         print(f'[{self.log_date_time_string()}] {args[0]}', file=sys.stderr)
@@ -197,13 +198,15 @@ class RequestHandler(BaseHTTPRequestHandler):
 
     def _handle_status(self):
         active_session = self.db.get_active_session()
+        capture = self.capture
         self._send_json({
             'server': 'simtrace-analyser-server',
             'version': __version__,
-            'capture_active': self.capture.active,
-            'session_id': self.capture.session_id,
+            'capture_mode': self.capture_mode,
+            'capture_active': capture.active if capture else False,
+            'session_id': capture.session_id if capture else None,
             'mode': active_session['mode'] if active_session else None,
-            'messages_count': self.db.count_messages(self.capture.session_id) if self.capture.session_id else 0,
+            'messages_count': self.db.count_messages(capture.session_id) if capture and capture.session_id else 0,
         })
 
     def _handle_list_sessions(self):
@@ -259,7 +262,7 @@ class RequestHandler(BaseHTTPRequestHandler):
 
     def _handle_capture_latest(self, params):
         after_id = int(params.get('after', [0])[0])
-        if not self.capture.active:
+        if not self.capture or not self.capture.active:
             self._send_json({'messages': [], 'next_after': after_id, 'active': False})
             return
         msg_id = self.capture.latest_msg_id
@@ -273,11 +276,14 @@ class RequestHandler(BaseHTTPRequestHandler):
 
     def _handle_capture_status(self):
         self._send_json({
-            'active': self.capture.active,
-            'session_id': self.capture.session_id,
+            'active': self.capture.active if self.capture else False,
+            'session_id': self.capture.session_id if self.capture else None,
         })
 
     def _handle_capture_start(self):
+        if self.capture_mode == 'disabled' or self.capture is None:
+            self._send_error(403, 'Capture disabled')
+            return
         if self.capture.active:
             self.capture.stop_session()
         session_id = self.capture.start_session()
@@ -285,6 +291,9 @@ class RequestHandler(BaseHTTPRequestHandler):
         self._send_json({'session_id': session_id, 'started': started})
 
     def _handle_capture_stop(self):
+        if self.capture_mode == 'disabled' or self.capture is None:
+            self._send_error(403, 'Capture disabled')
+            return
         if not self.capture.active:
             self._send_error(400, 'No active capture')
             return
@@ -336,7 +345,7 @@ class RequestHandler(BaseHTTPRequestHandler):
         self._send_json({'ok': True})
 
     def _handle_delete_session(self, session_id):
-        if self.capture.session_id == session_id:
+        if self.capture and self.capture.session_id == session_id:
             self.capture.stop_session()
         self.db.delete_session(session_id)
         self.db.vacuum()

@@ -140,7 +140,7 @@ class TestImportEndpoint(unittest.TestCase):
 class TestVersion(unittest.TestCase):
     def test_package_version(self):
         from simtrace2_pysniff import __version__
-        self.assertEqual(__version__, '1.1.0')
+        self.assertEqual(__version__, '1.2.0')
 
     def test_status_includes_version(self):
         import os
@@ -169,6 +169,58 @@ class TestVersion(unittest.TestCase):
         h = Fake(db)
         h._handle_status()
         self.assertEqual(h._json['version'], __version__)
+
+
+class TestCaptureDisabled(unittest.TestCase):
+    def _handler(self, capture_mode):
+        import os
+        from simtrace2_pysniff.server.server import RequestHandler
+        from simtrace2_pysniff.server.database import Database
+
+        class Fake(RequestHandler):
+            def __init__(self, db, capture_mode):
+                self.db = db
+                self.capture = None
+                self.capture_mode = capture_mode
+                self._status = None
+                self._json = None
+
+            def _send_json(self, data, status=200):
+                self._status = status
+                self._json = data
+
+            def _send_error(self, status, message):
+                self._status = status
+                self._json = {'error': message}
+
+        tmp = tempfile.NamedTemporaryFile(suffix='.db', delete=False)
+        tmp.close()
+        db = Database(tmp.name)
+        self.addCleanup(lambda: (db._conn.close(), os.remove(tmp.name)))
+        return Fake(db, capture_mode)
+
+    def test_status_reports_disabled(self):
+        h = self._handler('disabled')
+        h._handle_status()
+        self.assertEqual(h._json['capture_mode'], 'disabled')
+        self.assertFalse(h._json['capture_active'])
+        self.assertIsNone(h._json['session_id'])
+
+    def test_capture_start_403(self):
+        h = self._handler('disabled')
+        h._handle_capture_start()
+        self.assertEqual(h._status, 403)
+        self.assertIn('Capture disabled', h._json['error'])
+
+    def test_capture_stop_403(self):
+        h = self._handler('disabled')
+        h._handle_capture_stop()
+        self.assertEqual(h._status, 403)
+
+    def test_status_reports_gsmtap(self):
+        h = self._handler('gsmtap')
+        h._handle_status()
+        self.assertEqual(h._json['capture_mode'], 'gsmtap')
 
 
 if __name__ == '__main__':
