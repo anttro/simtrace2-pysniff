@@ -137,5 +137,39 @@ class TestImportEndpoint(unittest.TestCase):
         self.assertEqual(h.db.count_sessions(), 0)
 
 
+class TestVersion(unittest.TestCase):
+    def test_package_version(self):
+        from simtrace2_pysniff import __version__
+        self.assertEqual(__version__, '1.0.0')
+
+    def test_status_includes_version(self):
+        import os
+        from simtrace2_pysniff.server.server import RequestHandler
+        from simtrace2_pysniff.server.database import Database
+        from simtrace2_pysniff import __version__
+
+        class FakeCapture:
+            active = False
+            session_id = None
+
+        class Fake(RequestHandler):
+            def __init__(self, db):
+                self.db = db
+                self.capture = FakeCapture()
+                self._json = None
+
+            def _send_json(self, data, status=200):
+                self._json = data
+
+        tmp = tempfile.NamedTemporaryFile(suffix='.db', delete=False)
+        tmp.close()
+        db = Database(tmp.name)
+        self.addCleanup(lambda: (db._conn.close(), os.remove(tmp.name)))
+
+        h = Fake(db)
+        h._handle_status()
+        self.assertEqual(h._json['version'], __version__)
+
+
 if __name__ == '__main__':
     unittest.main()

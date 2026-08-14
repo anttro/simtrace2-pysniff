@@ -13,6 +13,7 @@ from .database import Database
 from .capture import CaptureManager, GsmtapListener, DirectSniffer
 from ..gsmtap import build_gsmtap_packet, GSMTAP_SIM_ATR, GSMTAP_SIM_APDU
 from ..pcap import build_pcap, parse_pcap, parse_pcapng
+from .. import __version__
 
 
 def _content_disposition(filename):
@@ -151,6 +152,7 @@ class RequestHandler(BaseHTTPRequestHandler):
         active_session = self.db.get_active_session()
         self._send_json({
             'server': 'simtrace-analyser-server',
+            'version': __version__,
             'capture_active': self.capture.active,
             'session_id': self.capture.session_id,
             'mode': active_session['mode'] if active_session else None,
