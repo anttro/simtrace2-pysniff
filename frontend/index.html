@@ -164,6 +164,7 @@ body { font: 14px/1.5 system-ui, sans-serif; background: var(--bg); color: var(-
 .settings-view input::placeholder { color: var(--text-muted); }
 .settings-url-row { display: flex; gap: 8px; margin-bottom: 16px; }
 .settings-url-row input { flex: 1; margin-bottom: 0; }
+.settings-url-row select { flex: 0 0 auto; padding: 8px 12px; background: var(--bg-input); border: 1px solid var(--border); color: var(--text); border-radius: 4px; }
 .settings-url-row button { padding: 8px 16px; background: var(--accent); color: #fff; border: none; border-radius: 4px; cursor: pointer; font-weight: 600; white-space: nowrap; }
 .settings-url-row button:hover { background: var(--accent-hover); }
 .settings-url-row button.disconnected { background: var(--bg-input); }
@@ -266,9 +267,13 @@ body { font: 14px/1.5 system-ui, sans-serif; background: var(--bg); color: var(-
 <!-- Settings Panel -->
 <div class="panel" id="panel-settings">
     <div class="settings-view">
-        <label for="server-url" data-l10n="Server URL">Server URL</label>
+        <label data-l10n="Server">Server</label>
         <div class="settings-url-row">
-            <input type="text" id="server-url" value="http://127.0.0.1:8081" placeholder="http://127.0.0.1:8081">
+            <select id="server-source">
+                <option value="same" data-l10n="Same origin">Same origin</option>
+                <option value="custom" data-l10n="Custom URL">Custom URL</option>
+            </select>
+            <input type="text" id="server-url" placeholder="http://127.0.0.1:8081" style="display:none;">
             <button id="connect-btn" data-l10n="Connect">Connect</button>
         </div>
         <div class="conn-status disconnected" id="conn-status">
@@ -305,7 +310,7 @@ if ('serviceWorker' in navigator) {
 
 // ──────────────────── State ────────────────────
 const STATE = {
-    serverUrl: window.SIMTRACE_EMBEDDED ? '' : (localStorage.getItem('serverUrl') || 'http://127.0.0.1:8081'),
+    serverUrl: localStorage.getItem('serverUrl') || '',
     activeTab: 'trace',
     captureActive: false,
     currentSessionId: null,
@@ -1060,6 +1065,15 @@ function isLikelyBlocked() {
     return pagePublic && (s === 'loopback' || s === 'private');
 }
 
+function syncServerSourceUi() {
+    const source = el('server-source');
+    const urlInput = el('server-url');
+    const custom = STATE.serverUrl !== '';
+    source.value = custom ? 'custom' : 'same';
+    urlInput.style.display = custom ? '' : 'none';
+    if (custom) urlInput.value = STATE.serverUrl;
+}
+
 function updateVersionWarn(serverVersion) {
     const elv = el('version-warn');
     const sv = parseVersion(serverVersion);
@@ -1257,7 +1271,9 @@ const LANG_RU = {
     'Start a capture from the Trace tab to create sessions.': 'Начните захват на вкладке «Трассировка», чтобы создать сессии.',
     'Import PCAP': 'Импорт PCAP',
     'New capture': 'Новый захват',
-    'Server URL': 'URL сервера',
+    'Server': 'Сервер',
+    'Same origin': 'Тот же источник',
+    'Custom URL': 'Свой URL',
     'Connect': 'Подключить',
     'Disconnect': 'Отключить',
     'Disconnected — click Connect to resume': 'Отключено — нажмите «Подключить», чтобы возобновить',
@@ -1403,7 +1419,7 @@ function init() {
     translatePage();
 
     el('pwa-version').textContent = 'v' + PWA_VERSION;
-    el('server-url').value = STATE.serverUrl;
+    syncServerSourceUi();
 
     document.querySelectorAll('.header-tab').forEach(tab => {
         tab.addEventListener('click', () => switchTab(tab.dataset.tab));
@@ -1447,6 +1463,23 @@ function init() {
 
     $on('search-input', 'input', onSearchChange);
     $on('filter-select', 'change', onFilterChange);
+
+    $on('server-source', 'change', () => {
+        if (el('server-source').value === 'same') {
+            STATE.serverUrl = '';
+            localStorage.setItem('serverUrl', '');
+            syncServerSourceUi();
+            checkConnection();
+        } else {
+            if (!el('server-url').value.trim()) {
+                el('server-url').value = 'http://127.0.0.1:8081';
+            }
+            STATE.serverUrl = el('server-url').value.trim();
+            localStorage.setItem('serverUrl', STATE.serverUrl);
+            syncServerSourceUi();
+            checkConnection();
+        }
+    });
 
     $on('server-url', 'change', () => {
         STATE.serverUrl = el('server-url').value.trim();
