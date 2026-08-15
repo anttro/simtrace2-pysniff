@@ -234,6 +234,32 @@ class TestFcpResponse(unittest.TestCase):
         self.assertEqual(fd['file_type'], 'Working EF')
         self.assertEqual(fd['structure'], 'linear fixed')
 
+    def test_fcp_file_size(self):
+        from simtrace2_pysniff.server.decode import _decode_fcp
+        # FCP: file descriptor (transparent EF) + FID 6F07 + file size 9 + total 9
+        fcp = _decode_fcp(bytes.fromhex('8202012183026f07800109810109'))
+        self.assertEqual(fcp['file_descriptor']['file_type'], 'Working EF')
+        self.assertEqual(fcp['file_descriptor']['structure'], 'transparent')
+        self.assertEqual(fcp['file_id_name'], 'EF_IMSI')
+        self.assertEqual(fcp['file_size'], 9)
+        self.assertEqual(fcp['total_file_size'], 9)
+
+    def test_fcp_summary_transparent(self):
+        # GET RESPONSE (FCP) for a transparent EF of 9 bytes
+        gr = bytes.fromhex('00c000000c') + bytes.fromhex('620c8202012183026f07800109810109') + bytes.fromhex('9000')
+        r = decode_message(gr, prev={'ins': 0xA4, 'ins_name': 'SELECT', 'sw1': '61'})
+        self.assertEqual(r['summary'], 'response for SELECT, Working EF, transparent, 9 B')
+
+    def test_fcp_summary_linear_fixed(self):
+        # linear fixed EF, 3 records x 64 bytes
+        gr = bytes.fromhex('00c000000e') + bytes.fromhex('620e8205022100400383026f07800109') + bytes.fromhex('9000')
+        r = decode_message(gr, prev={'ins': 0xA4, 'ins_name': 'SELECT', 'sw1': '61'})
+        self.assertEqual(r['summary'], 'response for SELECT, Working EF, linear fixed, 3 rec × 64 B')
+
+    def test_fcp_summary_df(self):
+        r = decode_message(self.GET_RESPONSE, prev={'ins': 0xA4, 'ins_name': 'SELECT', 'sw1': '61'})
+        self.assertEqual(r['summary'], 'response for SELECT, DF or ADF (MF)')
+
 
 class TestAuthResponse(unittest.TestCase):
     def test_3g_success(self):
@@ -818,6 +844,144 @@ class TestSelectPath(unittest.TestCase):
     def test_path_5gs(self):
         r = decode_message(bytes.fromhex('a0a40804067fff5fc04f019000'))
         self.assertEqual(r['body']['note'], 'current ADF/DF_5GS/EF_5GS3GPPLOCI')
+
+
+class TestFileDecoders(unittest.TestCase):
+    def test_imsi(self):
+        from simtrace2_pysniff.server.decode import _decode_file_data
+        f = _decode_file_data('6f07', bytes.fromhex('0f52001132547698f0'))
+        self.assertEqual(f['imsi'], '250011234567890')
+
+    def test_iccid(self):
+        from simtrace2_pysniff.server.decode import _decode_file_data
+        f = _decode_file_data('2fe2', bytes.fromhex('98891020000000460012'))
+        self.assertEqual(f['iccid'], '89980102000000640021')
+
+    def test_li(self):
+        from simtrace2_pysniff.server.decode import _decode_file_data
+        f = _decode_file_data('6f05', b'enru')
+        self.assertEqual(f['languages'], ['en', 'ru'])
+
+    def test_adn(self):
+        from simtrace2_pysniff.server.decode import _decode_file_data
+        f = _decode_file_data('6f3a', bytes.fromhex(
+            '42204841203120536963FFFFFFFFFFFF06810628560810FFFFFFFFFFFFFF'))
+        self.assertEqual(f['name'], 'B HA 1 Sic')
+        self.assertEqual(f['number'], '6082658001')
+
+    def test_ust(self):
+        from simtrace2_pysniff.server.decode import _decode_file_data
+        f = _decode_file_data('6f38', bytes.fromhex('07'))
+        self.assertEqual([s['n'] for s in f['services']], [1, 2, 3])
+        self.assertEqual(f['services'][0]['name'], 'Local Phone Book')
+
+    def test_plmn_list(self):
+        from simtrace2_pysniff.server.decode import _decode_file_data
+        f = _decode_file_data('6f30', bytes.fromhex('42f095'))
+        self.assertEqual(len(f['plmns']), 1)
+        self.assertIn('mcc', f['plmns'][0])
+        self.assertIn('mnc', f['plmns'][0])
+
+    def test_dir(self):
+        from simtrace2_pysniff.server.decode import _decode_file_data
+        f = _decode_file_data('2f00', bytes.fromhex(
+            '612b4f10a0000000871002fffff00189000001ff50074d656761466f6e'
+            '730ea00c80011781025f408203454150ffffffffffffffffffffffffffffffffffffff'))
+        self.assertEqual(f['applications'][0]['label'], 'MegaFon')
+        self.assertEqual(f['applications'][0]['aid'], 'A0000000871002FFFFF00189000001FF')
+
+    def test_plmn_wact(self):
+        from simtrace2_pysniff.server.decode import _decode_file_data
+        # TS 51.011 §10.3.35: 5-byte entries (3 PLMN + 2 access tech).
+        f = _decode_file_data('6f60', bytes.fromhex('52f020400052f0208000'))
+        self.assertEqual(f['plmns'][0]['mcc'], '250')
+        self.assertEqual(f['plmns'][0]['mnc'], '02')
+        self.assertEqual(f['plmns'][0]['access_tech'], 'E-UTRAN NB-S1, E-UTRAN WB-S1')
+        self.assertEqual(f['plmns'][1]['access_tech'], 'UTRAN')
+
+    def test_sms_record(self):
+        from simtrace2_pysniff.server.decode import _decode_file_data
+        # status 0x07 (MO, to be sent) + empty SMSC (len 0) + SMS-SUBMIT TPDU
+        rec = bytes.fromhex('0700') + bytes.fromhex('01ff038199f90004024869')
+        f = _decode_file_data('6f3c', rec)
+        self.assertEqual(f['direction'], 'MO')
+        self.assertEqual(f['status'], 'message to be sent')
+        self.assertEqual(f['tpdu']['mti'], 'SMS-SUBMIT')
+        self.assertEqual(f['tpdu']['da'], '999')
+        self.assertEqual(f['tpdu']['text'], 'Hi')
+
+    def test_read_binary_direct(self):
+        # SELECT EF_IMSI then READ BINARY → file decoded in body.
+        r = decode_message(bytes.fromhex('00b0000009') +
+                           bytes.fromhex('0f52001132547698f0') + bytes.fromhex('9000'),
+                           prev={'sel': {'fid': '6f07', 'name': 'EF_IMSI'}})
+        self.assertEqual(r['file']['imsi'], '250011234567890')
+        self.assertIn('IMSI 250011234567890', r['summary'])
+
+    def test_read_binary_offset_skip(self):
+        r = decode_message(bytes.fromhex('00b00100') +
+                           bytes.fromhex('0f52001132547698f0') + bytes.fromhex('9000'),
+                           prev={'sel': {'fid': '6f07'}})
+        self.assertNotIn('file', r)
+
+    def test_read_via_get_response(self):
+        iccid = bytes.fromhex('98891020000000460012')
+        gr = bytes.fromhex('00c00000') + bytes([len(iccid)]) + iccid + bytes.fromhex('9000')
+        r = decode_message(gr, prev={'ins': 0xB0, 'ins_name': 'READ BINARY', 'sw1': '61',
+                                     'sel': {'fid': '2fe2'}, 'file_ok': True})
+        self.assertEqual(r['file']['iccid'], '89980102000000640021')
+
+    def test_get_response_file_ok_false(self):
+        iccid = bytes.fromhex('98891020000000460012')
+        gr = bytes.fromhex('00c00000') + bytes([len(iccid)]) + iccid + bytes.fromhex('9000')
+        r = decode_message(gr, prev={'ins': 0xB0, 'ins_name': 'READ BINARY', 'sw1': '61',
+                                     'sel': {'fid': '2fe2'}, 'file_ok': False})
+        self.assertNotIn('file', r)
+
+    def test_search_record_numbers(self):
+        # SEARCH RECORD returns 61xx; GET RESPONSE carries the record numbers.
+        numbers = bytes(range(3, 21))  # 3..20
+        gr = bytes.fromhex('00c00000') + bytes([len(numbers)]) + numbers + bytes.fromhex('9000')
+        r = decode_message(gr, prev={'ins': 0xA2, 'ins_name': 'SEARCH RECORD', 'sw1': '61',
+                                     'sel': {'fid': '6f3a'}, 'file_ok': True})
+        self.assertEqual(r['file']['record_numbers'], list(range(3, 21)))
+        self.assertIn('18 record(s)', r['summary'])
+
+    def test_select_target_fid(self):
+        from simtrace2_pysniff.server.decode import select_target_fid
+        self.assertEqual(select_target_fid({'p1': {'raw': '00'}, 'body': {'hex': '6f07'}}), '6f07')
+        self.assertEqual(select_target_fid({'p1': {'raw': '08'}, 'body': {'hex': '7fff6f05'}}), '6f05')
+        self.assertIsNone(select_target_fid({'p1': {'raw': '04'}, 'body': {'hex': 'a0000000871002'}}))
+        self.assertIsNone(select_target_fid({'p1': {'raw': '08'}, 'body': {'hex': '7fff'}}))
+
+
+class TestSelectionTracking(unittest.TestCase):
+    def test_select_then_read(self):
+        import tempfile
+        from simtrace2_pysniff.server.database import Database
+        with tempfile.NamedTemporaryFile(suffix='.db') as tmp:
+            db = Database(tmp.name)
+            sid = db.create_session('capture')
+            db.insert_message(sid, 0.0, 'atr', b'\x3b\x00')
+            db.insert_message(sid, 0.1, 'tpdu', bytes.fromhex('a0a40804047fff6f079000'))
+            db.insert_message(sid, 0.2, 'tpdu',
+                              bytes.fromhex('00b0000009') + bytes.fromhex('0f52001132547698f0') + bytes.fromhex('9000'))
+            msgs = db.get_messages(sid)
+            read = msgs[2]
+            self.assertEqual(read['decoded']['file']['imsi'], '250011234567890')
+
+    def test_atr_resets_selection(self):
+        import tempfile
+        from simtrace2_pysniff.server.database import Database
+        with tempfile.NamedTemporaryFile(suffix='.db') as tmp:
+            db = Database(tmp.name)
+            sid = db.create_session('capture')
+            db.insert_message(sid, 0.0, 'tpdu', bytes.fromhex('a0a40804047fff6f079000'))
+            db.insert_message(sid, 0.1, 'atr', b'\x3b\x00')
+            db.insert_message(sid, 0.2, 'tpdu',
+                              bytes.fromhex('00b0000009') + bytes.fromhex('0f52001132547698f0') + bytes.fromhex('9000'))
+            msgs = db.get_messages(sid)
+            self.assertNotIn('file', msgs[2]['decoded'])
 
 
 if __name__ == '__main__':

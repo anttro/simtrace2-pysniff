@@ -419,6 +419,24 @@ def _decode_select_path(body_hex):
     return '/'.join(parts)
 
 
+def select_target_fid(d):
+    """Return the FID targeted by a decoded SELECT message, or None.
+
+    Used by the server's selection tracking to know which file is
+    currently selected (so READ/UPDATE bodies can be decoded).
+    """
+    p1 = (d.get('p1') or {}).get('raw')
+    h = (d.get('body') or {}).get('hex') or ''
+    if p1 in ('00', '01'):  # select by FID / child DF
+        return h if len(h) == 4 else None
+    if p1 in ('08', '09'):  # select by path
+        if len(h) >= 4:
+            last = h[-4:]
+            return None if last == '7fff' else last
+        return None
+    return None
+
+
 # ──────────────────── Per-INS specifications ────────────────────
 
 APDU_SPEC = {
@@ -1090,6 +1108,10 @@ def _decode_fcp(data):
                 result['file_id_name'] = KNOWN_FIDS[fid.lower()]
         elif tag == 0x84:
             result['df_name'] = value.hex().upper()
+        elif tag == 0x80:
+            result['file_size'] = int.from_bytes(value, 'big')
+        elif tag == 0x81:
+            result['total_file_size'] = int.from_bytes(value, 'big')
         elif tag == 0x88:
             result['sfi'] = f'0x{value[0]:02X}' if value else None
         elif tag == 0x8A:
@@ -1787,6 +1809,540 @@ def _decode_proactive(body):
 
 # ──────────────────── Decode entry point ────────────────────
 
+# ──────────────────── File data decoders (READ/UPDATE) ────────────────────
+# These decode the *body* of READ BINARY/RECORD and UPDATE BINARY/RECORD
+# commands using the currently selected file (see select_target_fid and the
+# server's selection tracking).  Sourced from pySim (TS 51.011 SIM, TS 31.102
+# USIM, TS 31.103 ISIM).
+
+# USIM Service Table (TS 31.102) — service n ↔ bit (n-1)
+UST_SERVICES = {
+    1: 'Local Phone Book', 2: 'Fixed Dialling Numbers (FDN)', 3: 'Extension 2',
+    4: 'Service Dialling Numbers (SDN)', 5: 'Extension3', 6: 'Barred Dialling Numbers (BDN)',
+    7: 'Extension4', 8: 'Outgoing Call Information (OCI and OCT)',
+    9: 'Incoming Call Information (ICI and ICT)', 10: 'Short Message Storage (SMS)',
+    11: 'Short Message Status Reports (SMSR)', 12: 'Short Message Service Parameters (SMSP)',
+    13: 'Advice of Charge (AoC)', 14: 'Capability Configuration Parameters 2 (CCP2)',
+    15: 'Cell Broadcast Message Identifier', 16: 'Cell Broadcast Message Identifier Ranges',
+    17: 'Group Identifier Level 1', 18: 'Group Identifier Level 2', 19: 'Service Provider Name',
+    20: 'User controlled PLMN selector with Access Technology', 21: 'MSISDN', 22: 'Image (IMG)',
+    23: 'Support of Localised Service Areas (SoLSA)', 24: 'Enhanced Multi-Level Precedence and Pre-emption Service',
+    25: 'Automatic Answer for eMLPP', 26: 'RFU', 27: 'GSM Access', 28: 'Data download via SMS-PP',
+    29: 'Data download via SMS-CB', 30: 'Call Control by USIM', 31: 'MO-SMS Control by USIM',
+    32: 'RUN AT COMMAND command', 33: 'shall be set to 1', 34: 'Enabled Services Table',
+    35: 'APN Control List (ACL)', 36: 'Depersonalisation Control Keys', 37: 'Co-operative Network List',
+    38: 'GSM security context', 39: 'CPBCCH Information', 40: 'Investigation Scan', 41: 'MexE',
+    42: 'Operator controlled PLMN selector with Access Technology', 43: 'HPLMN selector with Access Technology',
+    44: 'Extension 5', 45: 'PLMN Network Name', 46: 'Operator PLMN List', 47: 'Mailbox Dialling Numbers',
+    48: 'Message Waiting Indication Status', 49: 'Call Forwarding Indication Status', 50: 'Reserved and shall be ignored',
+    51: 'Service Provider Display Information', 52: 'Multimedia Messaging Service (MMS)', 53: 'Extension 8',
+    54: 'Call control on GPRS by USIM', 55: 'MMS User Connectivity Parameters',
+    56: "Network's indication of alerting in the MS (NIA)", 57: 'VGCS Group Identifier List (EFVGCS and EFVGCSS)',
+    58: 'VBS Group Identifier List (EFVBS and EFVBSS)', 59: 'Pseudonym',
+    60: 'User Controlled PLMN selector for I-WLAN access', 61: 'Operator Controlled PLMN selector for I-WLAN access',
+    62: 'User controlled WSID list', 63: 'Operator controlled WSID list', 64: 'VGCS security', 65: 'VBS security',
+    66: 'WLAN Reauthentication Identity', 67: 'Multimedia Messages Storage',
+    68: 'Generic Bootstrapping Architecture (GBA)', 69: 'MBMS security',
+    70: 'Data download via USSD and USSD application mode', 71: 'Equivalent HPLMN',
+    72: 'Additional TERMINAL PROFILE after UICC activation', 73: 'Equivalent HPLMN Presentation Indication',
+    74: 'Last RPLMN Selection Indication', 75: 'OMA BCAST Smart Card Profile',
+    76: 'GBA-based Local Key Establishment Mechanism', 77: 'Terminal Applications', 78: 'Service Provider Name Icon',
+    79: 'PLMN Network Name Icon', 80: 'Connectivity Parameters for USIM IP connections',
+    81: 'Home I-WLAN Specific Identifier List', 82: 'I-WLAN Equivalent HPLMN Presentation Indication',
+    83: 'I-WLAN HPLMN Priority Indication', 84: 'I-WLAN Last Registered PLMN', 85: 'EPS Mobility Management Information',
+    86: 'Allowed CSG Lists and corresponding indications', 87: 'Call control on EPS PDN connection by USIM',
+    88: 'HPLMN Direct Access', 89: 'eCall Data', 90: 'Operator CSG Lists and corresponding indications',
+    91: 'Support for SM-over-IP', 92: 'Support of CSG Display Control', 93: 'Communication Control for IMS by USIM',
+    94: 'Extended Terminal Applications', 95: 'Support of UICC access to IMS',
+    96: 'Non-Access Stratum configuration by USIM', 97: 'PWS configuration by USIM', 98: 'RFU',
+    99: 'URI support by UICC', 100: 'Extended EARFCN support', 101: 'ProSe', 102: 'USAT Application Pairing',
+    103: 'Media Type support', 104: 'IMS call disconnection cause', 105: 'URI support for MO SHORT MESSAGE CONTROL',
+    106: 'ePDG configuration Information support', 107: 'ePDG configuration Information configured', 108: 'ACDC support',
+    109: 'MCPTT', 110: 'ePDG configuration Information for Emergency Service support',
+    111: 'ePDG configuration Information for Emergency Service configured', 112: 'eCall Data over IMS',
+    113: 'URI support for SMS-PP DOWNLOAD as defined in 3GPP TS 31.111 [12]', 114: 'From Preferred',
+    115: 'IMS configuration data', 116: 'TV configuration', 117: '3GPP PS Data Off',
+    118: '3GPP PS Data Off Service List', 119: 'V2X', 120: 'XCAP Configuration Data',
+    121: 'EARFCN list for MTC/NB-IOT UEs', 122: '5GS Mobility Management Information', 123: '5G Security Parameters',
+    124: 'Subscription identifier privacy support', 125: 'SUCI calculation by the USIM',
+    126: 'UAC Access Identities support',
+    127: 'Expect control plane-based Steering of Roaming information during initial registration in VPLMN',
+    128: 'Call control on PDU Session by USIM', 129: '5GS Operator PLMN List',
+    130: 'Support for SUPI of type NSI or GLI or GCI', 131: '3GPP PS Data Off separate Home and Roaming lists',
+    132: 'Support for URSP by USIM', 133: '5G Security Parameters extended', 134: 'MuD and MiD configuration data',
+    135: 'Support for Trusted non-3GPP access networks by USIM',
+    136: 'Support for multiple records of NAS security context storage for multiple registration',
+    137: 'Pre-configured CAG information list', 138: 'SOR-CMCI storage in USIM', 139: '5G ProSe',
+    140: 'Storage of disaster roaming information in USIM', 141: 'Pre-configured eDRX parameters',
+    142: '5G NSWO support', 143: 'PWS configuration for SNPN in USIM',
+    144: 'Multiplier Coefficient for Higher Priority PLMN search via NG-RAN satellite access',
+    145: 'K_AUSF derivation configuration', 146: 'Network Identifier for SNPN (NID)',
+}
+
+# SIM Service Table (TS 51.011)
+SST_SERVICES = {
+    1: 'CHV1 disable function', 2: 'Abbreviated Dialling Numbers (ADN)', 3: 'Fixed Dialling Numbers (FDN)',
+    4: 'Short Message Storage (SMS)', 5: 'Advice of Charge (AoC)', 6: 'Capability Configuration Parameters (CCP)',
+    7: 'PLMN selector', 8: 'RFU', 9: 'MSISDN', 10: 'Extension1', 11: 'Extension2', 12: 'SMS Parameters',
+    13: 'Last Number Dialled (LND)', 14: 'Cell Broadcast Message Identifier', 15: 'Group Identifier Level 1',
+    16: 'Group Identifier Level 2', 17: 'Service Provider Name', 18: 'Service Dialling Numbers (SDN)',
+    19: 'Extension3', 20: 'RFU', 21: 'VGCS Group Identifier List (EFVGCS and EFVGCSS)',
+    22: 'VBS Group Identifier List (EFVBS and EFVBSS)', 23: 'enhanced Multi-Level Precedence and Pre-emption Service',
+    24: 'Automatic Answer for eMLPP', 25: 'Data download via SMS-CB', 26: 'Data download via SMS-PP',
+    27: 'Menu selection', 28: 'Call control', 29: 'Proactive SIM', 30: 'Cell Broadcast Message Identifier Ranges',
+    31: 'Barred Dialling Numbers (BDN)', 32: 'Extension4', 33: 'De-personalization Control Keys',
+    34: 'Co-operative Network List', 35: 'Short Message Status Reports', 36: "Network's indication of alerting in the MS",
+    37: 'Mobile Originated Short Message control by SIM', 38: 'GPRS', 39: 'Image (IMG)',
+    40: 'SoLSA (Support of Local Service Area)', 41: 'USSD string data object supported in Call Control',
+    42: 'RUN AT COMMAND command', 43: 'User controlled PLMN Selector with Access Technology',
+    44: 'Operator controlled PLMN Selector with Access Technology', 45: 'HPLMN Selector with Access Technology',
+    46: 'CPBCCH Information', 47: 'Investigation Scan', 48: 'Extended Capability Configuration Parameters',
+    49: 'MExE', 50: 'Reserved and shall be ignored', 51: 'PLMN Network Name', 52: 'Operator PLMN List',
+    53: 'Mailbox Dialling Numbers', 54: 'Message Waiting Indication Status', 55: 'Call Forwarding Indication Status',
+    56: 'Service Provider Display Information', 57: 'Multimedia Messaging Service (MMS)', 58: 'Extension 8',
+    59: 'MMS User Connectivity Parameters',
+}
+
+# ISIM Service Table (TS 31.103)
+IST_SERVICES = {
+    1: 'P-CSCF address', 2: 'Generic Bootstrapping Architecture (GBA)', 3: 'HTTP Digest',
+    4: 'GBA-based Local Key Establishment Mechanism', 5: 'Support of P-CSCF discovery for IMS Local Break Out',
+    6: 'Short Message Storage (SMS)', 7: 'Short Message Status Reports (SMSR)',
+    8: 'Support for SM-over-IP including data download via SMS-PP as defined in TS 31.111 [31]',
+    9: 'Communication Control for IMS by ISIM', 10: 'Support of UICC access to IMS', 11: 'URI support by UICC',
+    12: 'Media Type support', 13: 'IMS call disconnection cause', 14: 'URI support for MO SHORT MESSAGE CONTROL',
+    15: 'MCPTT', 16: 'URI support for SMS-PP DOWNLOAD as defined in 3GPP TS 31.111 [31]', 17: 'From Preferred',
+    18: 'IMS configuration data', 19: 'XCAP Configuration Data', 20: 'WebRTC URI',
+    21: 'MuD and MiD configuration data', 22: 'IMS Data Channel indication',
+}
+
+_PHASE_NAMES = {0x00: 'phase 1', 0x02: 'phase 2', 0x03: 'phase 2 and higher'}
+
+
+def _decode_service_table(raw, table):
+    flags = []
+    for i, b in enumerate(raw):
+        for bit in range(8):
+            if b & (1 << bit):
+                n = i * 8 + bit + 1
+                flags.append({'n': n, 'name': table.get(n)})
+    return {'services': flags}
+
+
+def _decode_imsi(raw, p1=None):
+    if not raw or all(b == 0xff for b in raw):
+        return {'empty': True}
+    if len(raw) <= 2:  # 6F07 is also the ISIM Service Table (IST)
+        return _decode_service_table(raw, IST_SERVICES)
+    digits = _swap_nibbles(raw[1:].hex()).rstrip('fF')
+    return {'imsi': digits or None}
+
+
+def _decode_iccid(raw, p1=None):
+    if not raw or all(b == 0xff for b in raw):
+        return {'empty': True}
+    digits = _swap_nibbles(raw.hex()).rstrip('fF')
+    return {'iccid': digits or None}
+
+
+def _decode_li(raw, p1=None):
+    """EF_LI / EF_PL — 2-letter ISO 639 language codes."""
+    codes = []
+    for i in range(0, len(raw) - 1, 2):
+        pair = raw[i:i + 2]
+        if pair == b'\xff\xff':
+            continue
+        try:
+            c = pair.decode('ascii')
+        except UnicodeDecodeError:
+            continue
+        if c.isalpha():
+            codes.append(c)
+    return {'languages': codes}
+
+
+def _decode_adn(raw, p1=None):
+    """ADN-format record: alpha + len_bcd + TON/NPI + number + CCP + ext1."""
+    if not raw or all(b == 0xff for b in raw):
+        return {'empty': True}
+    if len(raw) < 14:
+        return {'raw': raw.hex().upper()}
+    alpha = raw[:-14].rstrip(b'\xff')
+    name = _decode_annex_a(alpha) if alpha else ''
+    number = _decode_bcd_address(raw[-13:-2])
+    ccp = raw[-2]
+    ext1 = raw[-1]
+    out = {'name': name, 'number': number}
+    if ccp != 0xff:
+        out['ccp'] = ccp
+    if ext1 != 0xff:
+        out['ext1'] = ext1
+    return out
+
+
+def _decode_sms_rec(raw, p1=None):
+    """EF_SMS record (TS 51.011 §10.5.3): status byte + SMSC address + TPDU."""
+    if not raw or all(b == 0xff for b in raw):
+        return {'empty': True}
+    s = raw[0]
+    if s & 0x01 == 0x00:
+        direction, status = None, 'free space'
+    elif s & 0x07 == 0x01:
+        direction, status = 'MT', 'message read'
+    elif s & 0x07 == 0x03:
+        direction, status = 'MT', 'message to be read'
+    elif s & 0x07 == 0x07:
+        direction, status = 'MO', 'message to be sent'
+    elif s & 0x1f == 0x05:
+        direction, status = 'MO', 'sent (status not requested)'
+    elif s & 0x1f == 0x0d:
+        direction, status = 'MO', 'sent (status requested, not received)'
+    elif s & 0x1f == 0x15:
+        direction, status = 'MO', 'sent (status received, not stored)'
+    elif s & 0x1f == 0x1d:
+        direction, status = 'MO', 'sent (status received, stored)'
+    else:
+        direction, status = None, 'RFU'
+    out = {'direction': direction, 'status': status}
+    remainder = raw[1:]
+    # Skip the TS-Service-Centre-Address: 1 length octet + that many octets.
+    if remainder:
+        sc_len = remainder[0]
+        i = 1 + sc_len
+        tpdu_bytes = remainder[i:].rstrip(b'\xff')
+        if tpdu_bytes:
+            out['tpdu'] = _decode_sm_tpdu(tpdu_bytes)
+    return out
+
+
+def _decode_plmn_list(raw, p1=None):
+    entries = []
+    for i in range(0, len(raw), 3):
+        chunk = raw[i:i + 3]
+        if len(chunk) < 3 or all(b == 0xff for b in chunk):
+            break
+        plmn = _decode_plmn(chunk)
+        if plmn:
+            entries.append(plmn)
+    return {'plmns': entries}
+
+
+def _decode_plmn_wact(raw, p1=None):
+    """PLMN selector with Access Technology (TS 51.011 §10.3.35): 5-byte entries.
+
+    Each entry: 3-byte PLMN + 2-byte access technology bitmask.
+    """
+    entries = []
+    for i in range(0, len(raw) - 4, 5):
+        chunk = raw[i:i + 5]
+        if len(chunk) < 5:
+            break
+        plmn_bytes = chunk[:3]
+        if all(b == 0xff for b in plmn_bytes):
+            break
+        plmn = _decode_plmn(plmn_bytes)
+        if not plmn:
+            continue
+        act = (chunk[3] << 8) | chunk[4]
+        techs = _decode_plmn_act(act)
+        plmn['access_tech'] = ', '.join(techs) if techs else f'0x{act:04X}'
+        entries.append(plmn)
+    return {'plmns': entries}
+
+
+def _decode_plmn_act(u16):
+    """Decode the 2-byte access-technology field (TS 31.102 §4.2.5)."""
+    techs = set()
+    if u16 & 0x8000:
+        techs.add('UTRAN')
+    if u16 & 0x0800:
+        techs.add('NG-RAN')
+    if u16 & 0x0040:
+        techs.add('GSM COMPACT')
+    if u16 & 0x0020:
+        techs.add('cdma2000 HRPD')
+    if u16 & 0x0010:
+        techs.add('cdma2000 1xRTT')
+    e = u16 & 0x7000
+    if e in (0x4000, 0x7000):
+        techs.add('E-UTRAN WB-S1')
+        techs.add('E-UTRAN NB-S1')
+    elif e == 0x5000:
+        techs.add('E-UTRAN NB-S1')
+    elif e == 0x6000:
+        techs.add('E-UTRAN WB-S1')
+    g = u16 & 0x008C
+    if g in (0x0080, 0x008C):
+        techs.add('GSM')
+        techs.add('EC-GSM-IoT')
+    elif g == 0x0084:
+        techs.add('GSM')
+    elif g == 0x0086:
+        techs.add('EC-GSM-IoT')
+    return sorted(techs)
+
+
+def _decode_dir(raw, p1=None):
+    """EF_DIR record: application template(s) — AID (4F) + label (50)."""
+    apps = []
+    for tag, _length, value in parse_tlv(raw):
+        if tag != 0x61:
+            continue
+        app = {}
+        for t2, _l2, v2 in parse_tlv(value):
+            if t2 == 0x4F:
+                app['aid'] = v2.hex().upper()
+            elif t2 == 0x50:
+                label = _decode_annex_a(v2)
+                if label:
+                    app['label'] = label
+        if app:
+            apps.append(app)
+    return {'applications': apps} if apps else {'raw': raw.hex().upper()}
+
+
+def _decode_arr(raw, p1=None):
+    entries = []
+    for tag, _length, value in parse_tlv(raw):
+        entries.append({'tag': f'0x{tag:02X}', 'hex': value.hex().upper()})
+    return {'rules': entries} if entries else {'raw': raw.hex().upper()}
+
+
+def _decode_pnn(raw, p1=None):
+    names = {}
+    for tag, _length, value in parse_tlv(raw):
+        if tag == 0x43:
+            names['full'] = _decode_annex_a(value)
+        elif tag == 0x45:
+            names['short'] = _decode_annex_a(value)
+    if not names:
+        txt = _decode_annex_a(raw.rstrip(b'\xff'))
+        if txt:
+            names['full'] = txt
+    return names or {'raw': raw.hex().upper()}
+
+
+def _decode_cbmi(raw, p1=None):
+    ids = []
+    for i in range(0, len(raw) - 1, 2):
+        v = (raw[i] << 8) | raw[i + 1]
+        if v == 0xffff:
+            continue
+        ids.append(v)
+    return {'message_ids': ids}
+
+
+def _decode_cbmir(raw, p1=None):
+    if len(raw) >= 4:
+        low = (raw[0] << 8) | raw[1]
+        high = (raw[2] << 8) | raw[3]
+        return {'range': [low, high]}
+    return {'raw': raw.hex().upper()}
+
+
+def _decode_ecc(raw, p1=None):
+    txt = _decode_annex_a(raw.rstrip(b'\xff'))
+    return {'number': txt} if txt else {'raw': raw.hex().upper()}
+
+
+def _decode_spn(raw, p1=None):
+    if len(raw) < 2:
+        return {'raw': raw.hex().upper()}
+    cond = raw[0]
+    text = _decode_annex_a(raw[1:].rstrip(b'\xff'))
+    out = {'display_condition': f'0x{cond:02X}'}
+    if text:
+        out['name'] = text
+    return out
+
+
+def _decode_loci(raw, p1=None):
+    if len(raw) < 13:
+        return {'raw': raw.hex().upper()}
+    tmsi = raw[0:4]
+    lai = raw[4:9]
+    plmn = _decode_plmn(lai[:3]) or {}
+    return {
+        'tmsi': None if all(b == 0xff for b in tmsi) else tmsi.hex().upper(),
+        'mcc': plmn.get('mcc'), 'mnc': plmn.get('mnc'),
+        'lac': '0x' + lai[3:5].hex().upper(),
+        'location_update_status': f'0x{raw[12]:02X}',
+    }
+
+
+def _decode_acc(raw, p1=None):
+    if len(raw) < 2:
+        return {'raw': raw.hex().upper()}
+    val = (raw[0] << 8) | raw[1]
+    classes = [i for i in range(16) if val & (0x8000 >> i)]
+    return {'access_classes': classes}
+
+
+def _decode_phase(raw, p1=None):
+    v = raw[0] if raw else 0
+    return {'phase': _PHASE_NAMES.get(v, f'0x{v:02X}')}
+
+
+def _decode_nai(raw, p1=None):
+    """ISIM identity files (EF_IMPI/DOMAIN/IMPU): BER-TLV tag 0x80 + ASCII value."""
+    texts = []
+    for tag, _length, value in parse_tlv(raw):
+        if tag == 0x80:
+            txt = value.decode('utf-8', 'replace').rstrip('\xff')
+            if txt:
+                texts.append(txt)
+    if texts:
+        return {'text': texts[0] if len(texts) == 1 else ', '.join(texts)}
+    txt = raw.decode('ascii', 'replace').replace('\xff', '').strip()
+    return {'text': txt} if txt else {'raw': raw.hex().upper()}
+
+
+def _decode_hex(raw, p1=None):
+    if not raw or all(b == 0xff for b in raw):
+        return {'empty': True}
+    return {'raw': raw.hex().upper()}
+
+
+FILE_DECODERS = {
+    '2fe2': _decode_iccid,
+    '6f07': _decode_imsi,
+    '6f05': _decode_li,
+    '2f05': _decode_li,
+    '6f3c': _decode_sms_rec,
+    '6f38': lambda raw, p1=None: _decode_service_table(raw, UST_SERVICES),
+    '6f30': _decode_plmn_list,
+    '6f7b': _decode_plmn_list,
+    '6f31': _decode_plmn_list,
+    '6fd9': _decode_plmn_list,
+    '6f60': _decode_plmn_wact,
+    '6f61': _decode_plmn_wact,
+    '6f62': _decode_plmn_wact,
+    '2f00': _decode_dir,
+    '6f40': _decode_adn,
+    '6f49': _decode_adn,
+    '6f3b': _decode_adn,
+    '6f3a': _decode_adn,
+    '6f4d': _decode_adn,
+    '6fc7': _decode_adn,
+    '6f80': _decode_adn,
+    '6f81': _decode_adn,
+    '6f45': _decode_cbmi,
+    '6f50': _decode_cbmir,
+    '2f06': _decode_arr,
+    '6f06': _decode_arr,
+    '6fc5': _decode_pnn,
+    '6fb7': _decode_ecc,
+    '6f46': _decode_spn,
+    '6f7e': _decode_loci,
+    '6f08': _decode_hex,
+    '6f09': _decode_hex,
+    '6f3e': _decode_hex,
+    '6f3f': _decode_hex,
+    '6fae': _decode_phase,
+    '6f78': _decode_acc,
+    '6fad': _decode_hex,
+    '6f02': _decode_nai,
+    '6f03': _decode_nai,
+    '6f04': _decode_nai,
+    '6fcb': _decode_hex,
+    '6fc4': _decode_hex,
+    '6fca': _decode_hex,
+    '6fc9': _decode_hex,
+}
+
+
+def _decode_file_data(fid, raw, p1=None):
+    """Decode file data using the FID's registered decoder."""
+    if not raw:
+        return None
+    fn = FILE_DECODERS.get(fid)
+    if not fn:
+        return None
+    try:
+        out = fn(raw, p1=p1)
+    except Exception:
+        return None
+    if not out:
+        return None
+    out['fid'] = fid
+    out['ef'] = KNOWN_FIDS.get(fid, fid.upper())
+    return out
+
+
+def _file_summary(f):
+    """Compact one-line summary of a decoded file body."""
+    if f.get('empty'):
+        return 'empty'
+    if f.get('imsi'):
+        return f"IMSI {f['imsi']}"
+    if f.get('iccid'):
+        return f"ICCID {f['iccid']}"
+    if f.get('languages'):
+        return 'languages ' + ' '.join(f['languages'])
+    if 'number' in f and 'name' in f:
+        return (f['name'] + ' ' + f['number']).strip()
+    if f.get('number'):
+        return f['number']
+    if f.get('text'):
+        return f['text']
+    if f.get('name'):
+        return f['name']
+    if f.get('plmns'):
+        return ', '.join(f"{p['mcc']}/{p['mnc']}" + (f" ({p['access_tech']})" if p.get('access_tech') else '')
+                         for p in f['plmns'])
+    if f.get('services'):
+        return f"{len(f['services'])} services allocated"
+    if f.get('applications'):
+        return '; '.join((a.get('label') or a.get('aid') or '') for a in f['applications'])
+    if f.get('tpdu'):
+        t = f['tpdu']
+        s = t.get('mti', '')
+        if t.get('text'):
+            s += f" \u00ab{t['text']}\u00bb"
+        return f"SMS {s}".strip()
+    if f.get('direction'):
+        return f"SMS {f['direction']} — {f['status']}"
+    if f.get('mcc'):
+        return f"MCC {f['mcc']} MNC {f['mnc']} · LAC {f.get('lac', '')}"
+    if f.get('access_classes') is not None:
+        return 'classes ' + ', '.join(str(c) for c in f['access_classes'])
+    if f.get('phase'):
+        return f['phase']
+    if f.get('range'):
+        return f"range {f['range'][0]}-{f['range'][1]}"
+    if f.get('message_ids') is not None:
+        return f"{len(f['message_ids'])} message IDs"
+    if f.get('record_numbers') is not None:
+        nums = f['record_numbers']
+        shown = ', '.join(str(n) for n in nums[:10])
+        if len(nums) > 10:
+            shown += ', \u2026'
+        return f"{len(nums)} record(s): {shown}"
+    return None
+
+
+def _fcp_summary(response_for, fd, response):
+    """Build a summary for a GET RESPONSE (FCP) following SELECT."""
+    ft = fd.get('file_type') or ''
+    label = f"response for {response_for}, {ft}"
+    if ft == 'DF or ADF':
+        name = response.get('file_id_name')
+        if name:
+            label += f" ({name})"
+    else:
+        struct = fd.get('structure') or ''
+        if struct:
+            label += f", {struct}"
+        nrec = fd.get('num_records')
+        rlen = fd.get('record_length')
+        fsize = response.get('file_size') or response.get('total_file_size')
+        if nrec and rlen:
+            label += f", {nrec} rec \u00d7 {rlen} B"
+        elif fsize:
+            label += f", {fsize} B"
+    return label
+
+
 def _build_summary(result):
     """Build a concise human-readable description of a decoded command.
 
@@ -1868,10 +2424,21 @@ def _build_summary(result):
     if result.get('response_to'):
         parts.append('\u2192 ' + result['response_to'])
     if result.get('response_for'):
-        parts.append('response for ' + result['response_for'])
+        response = result.get('response') or {}
+        fd = response.get('file_descriptor')
+        if fd:
+            parts.append(_fcp_summary(result['response_for'], fd, response))
+        else:
+            parts.append('response for ' + result['response_for'])
     response = result.get('response')
     if response and response.get('name'):
         parts.append(response['name'])
+
+    file_dec = result.get('file')
+    if file_dec:
+        txt = _file_summary(file_dec)
+        if txt:
+            parts.append(f"{file_dec.get('ef', '')} {txt}".strip())
 
     return ', '.join(parts) if parts else None
 
@@ -1964,6 +2531,14 @@ def decode_message(raw_data, prev=None):
             elif ins == 0x12:  # FETCH → proactive command body
                 result['cmd'] = _decode_proactive(body)
 
+        # File data decode for READ/UPDATE using the current selection.
+        if ins in (0xB0, 0xB2, 0xD6, 0xDC) and prev and prev.get('sel'):
+            offset = (result.get('p1p2') or {}).get('value', 0)
+            if ins in (0xB2, 0xDC) or offset == 0:
+                file_dec = _decode_file_data(prev['sel']['fid'], body, p1=p1)
+                if file_dec:
+                    result['file'] = file_dec
+
     # SW
     if sw_bytes:
         result['sw'] = decode_sw(sw_bytes)
@@ -1975,9 +2550,22 @@ def decode_message(raw_data, prev=None):
             result['response_for'] = prev.get('ins_name')
             prev_ins = prev.get('ins')
             if prev_ins is not None and cmd_body_len > 0:
-                response = _decode_response_for(prev_ins, remaining[:cmd_body_len])
-                if response:
-                    result['response'] = response
+                if prev_ins in (0xB0, 0xB2) and prev.get('sel') and prev.get('file_ok'):
+                    file_dec = _decode_file_data(prev['sel']['fid'], remaining[:cmd_body_len])
+                    if file_dec:
+                        result['file'] = file_dec
+                elif prev_ins == 0xA2 and prev.get('sel') and prev.get('file_ok'):
+                    # SEARCH RECORD → list of matching record numbers
+                    fid = prev['sel']['fid']
+                    result['file'] = {
+                        'fid': fid,
+                        'ef': KNOWN_FIDS.get(fid, fid.upper()),
+                        'record_numbers': list(remaining[:cmd_body_len]),
+                    }
+                else:
+                    response = _decode_response_for(prev_ins, remaining[:cmd_body_len])
+                    if response:
+                        result['response'] = response
         else:
             result['response_for'] = None
 

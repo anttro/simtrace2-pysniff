@@ -168,7 +168,8 @@ class Database:
             (session_id, limit, offset)).fetchall()
         initial_prev = None
         if offset > 0 and rows:
-            initial_prev = self._last_tpdu_context(session_id, rows[0][0])
+            initial_prev = self._last_tpdu_context(session_id, rows[0][0]) or {}
+            initial_prev['sel'] = self._last_selection(session_id, rows[0][0])
         return self._decode_rows(rows, initial_prev=initial_prev)
 
     def get_messages_after(self, session_id, after_id):
@@ -176,7 +177,8 @@ class Database:
             'SELECT id, session_id, elapsed, type, data, flags FROM messages '
             'WHERE session_id=? AND id > ? ORDER BY elapsed, id',
             (session_id, after_id)).fetchall()
-        initial_prev = self._last_tpdu_context(session_id, after_id + 1)
+        initial_prev = self._last_tpdu_context(session_id, after_id + 1) or {}
+        initial_prev['sel'] = self._last_selection(session_id, after_id + 1)
         return self._decode_rows(rows, initial_prev=initial_prev)
 
     def get_messages_raw(self, session_id):
@@ -248,22 +250,68 @@ class Database:
             return None
         return self._context_from_decoded(d)
 
+    def _last_selection(self, session_id, before_id):
+        """Replay (bounded, backwards) to find the current selection.
+
+        Scans back from *before_id* to the last file-defining event:
+        an ATR/card-change resets selection; a SELECT sets it.
+        """
+        from .decode import decode_sniff_msg, select_target_fid, KNOWN_FIDS
+        rows = self._conn.execute(
+            "SELECT data, type FROM messages WHERE session_id=? AND id < ? "
+            "AND type IN ('tpdu','atr','change') ORDER BY id DESC LIMIT 500",
+            (session_id, before_id)).fetchall()
+        for data, typ in rows:
+            if typ in ('atr', 'change'):
+                return None
+            d = decode_sniff_msg(data, 'tpdu', 0)
+            if d and d.get('ins_hex') == 'a4':
+                fid = select_target_fid(d)
+                if fid:
+                    return {'fid': fid, 'name': KNOWN_FIDS.get(fid)}
+                if (d.get('p1') or {}).get('raw') in ('03', '04'):
+                    return None
+        return None
+
     def _context_from_decoded(self, d):
         ins_hex = d.get('ins_hex')
         ins = int(ins_hex, 16) if ins_hex else None
+        file_ok = False
+        if ins in (0xB2, 0xDC, 0xA2):
+            file_ok = True
+        elif ins in (0xB0, 0xD6):
+            file_ok = (d.get('p1p2') or {}).get('value', 0) == 0
         return {
             'ins': ins,
             'ins_name': d.get('ins_name'),
             'sw1': (d.get('sw') or {}).get('sw1'),
+            'file_ok': file_ok,
         }
+
+    def _selection_after(self, d, sel):
+        if d.get('ins_hex') == 'a4':
+            from .decode import select_target_fid, KNOWN_FIDS
+            fid = select_target_fid(d)
+            if fid:
+                return {'fid': fid, 'name': KNOWN_FIDS.get(fid)}
+            if (d.get('p1') or {}).get('raw') in ('03', '04'):
+                return None
+        return sel
 
     def _decode_rows(self, rows, initial_prev=None):
         msgs = []
         prev = initial_prev
+        sel = (initial_prev or {}).get('sel')
         for row in rows:
-            msg = self._row_to_message(row, prev=prev)
+            ctx = dict(prev) if prev else {}
+            ctx['sel'] = sel
+            msg = self._row_to_message(row, prev=ctx)
             d = msg.get('decoded')
             if msg['type'] == 'tpdu' and d and d.get('ins_hex'):
+                sel = self._selection_after(d, sel)
                 prev = self._context_from_decoded(d)
+            elif msg['type'] in ('atr', 'change'):
+                sel = None
+                prev = None
             msgs.append(msg)
         return msgs
