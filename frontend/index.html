@@ -104,6 +104,7 @@ body { font: 14px/1.5 system-ui, sans-serif; background: var(--bg); color: var(-
 .apdu-entry { display: flex; gap: 12px; padding: 3px 12px; border-bottom: 1px solid var(--bg-panel); cursor: pointer; align-items: baseline; }
 .apdu-entry:hover { background: var(--bg-panel); }
 .apdu-entry.selected { background: var(--bg-input); }
+[data-theme="light"] .apdu-entry.selected { background: #dbeafe; }
 .apdu-time { color: var(--text-muted); font-family: monospace; white-space: nowrap; min-width: 80px; }
 .apdu-type { color: var(--text); font-weight: 600; min-width: 150px; }
 .apdu-type.atr { color: var(--green); }
