@@ -122,34 +122,301 @@ def decode_cla(cla):
 
 
 # ──────────────────── Known FIDs ────────────────────
+# Sourced from pySim (TS 102 221 common, TS 51.011 SIM, TS 31.102 USIM,
+# TS 31.103 ISIM).  Note: some FIDs are reused across DFs/ADFs; the
+# USIM/ISIM interpretation is preferred here because the '7FFF' (current
+# ADF) SELECT-path resolution is the primary use case.
 
 KNOWN_FIDS = {
+    # Master File and common files (TS 102 221 / TS 51.011)
     '3f00': 'MF',
     '2f00': 'EF_DIR',
-    '2fe2': 'EF_ICCID',
     '2f05': 'EF_PL',
     '2f06': 'EF_ARR',
+    '2f08': 'EF_UMPC',
+    '2fe2': 'EF_ICCID',
+
+    # Dedicated files (MF/ADF level)
     '7f10': 'DF_TELECOM',
     '7f20': 'DF_GSM',
-    '5f3a': 'DF_GSM_ACCESS',
-    '2f07': 'EF_IMSI',
+    '5f3b': 'DF_GSM_ACCESS',
+    '5f40': 'DF_WLAN',
+    '5f50': 'DF_HNB',
+    '5f90': 'DF_ProSe',
+    '5ff0': 'DF_5G_ProSe',
+    '5fc0': 'DF_5GS',
+    '5fe0': 'DF_SNPN',
+    '5ff1': 'DF_5MBSUECONFIG',
+
+    # SIM (TS 51.011) — DF_TELECOM / DF_GSM
     '6f05': 'EF_LI',
     '6f07': 'EF_IMSI',
     '6f20': 'EF_Kc',
+    '6f2c': 'EF_DCK',
     '6f30': 'EF_PLMNsel',
     '6f31': 'EF_HPPLMN',
+    '6f32': 'EF_CNL',
     '6f37': 'EF_ACMmax',
-    '6f38': 'EF_SST',
+    '6f38': 'EF_UST',
     '6f39': 'EF_ACM',
+    '6f3a': 'EF_ADN',
+    '6f3b': 'EF_FDN',
+    '6f3c': 'EF_SMS',
+    '6f3d': 'EF_CCP',
     '6f3e': 'EF_GID1',
     '6f3f': 'EF_GID2',
+    '6f40': 'EF_MSISDN',
+    '6f41': 'EF_PUCT',
+    '6f42': 'EF_SMSP',
+    '6f43': 'EF_SMSS',
+    '6f44': 'EF_LND',
+    '6f45': 'EF_CBMI',
     '6f46': 'EF_SPN',
-    '6f74': 'EF_ARR',
+    '6f47': 'EF_SMSR',
+    '6f48': 'EF_CBMID',
+    '6f49': 'EF_SDN',
+    '6f4a': 'EF_EXT1',
+    '6f4b': 'EF_EXT2',
+    '6f4c': 'EF_EXT3',
+    '6f4d': 'EF_BDN',
+    '6f4e': 'EF_EXT4',
+    '6f4f': 'EF_ECCP',
+    '6f50': 'EF_CBMIR',
+    '6f51': 'EF_NIA',
+    '6f52': 'EF_KcGPRS',
+    '6f53': 'EF_LOCI_GPRS',
+    '6f58': 'EF_CMI',
+    '6f63': 'EF_CPBCCH',
+    '6f64': 'EF_InvScan',
+    '6f74': 'EF_BCCH',
     '6f78': 'EF_ACC',
     '6f7b': 'EF_FPLMN',
-    '6fad': 'EF_ADN',
+    '6f7e': 'EF_LOCI',
+    '6fad': 'EF_AD',
     '6fae': 'EF_Phase',
+    '6fb1': 'EF_VGCS',
+    '6fb2': 'EF_VGCSS',
+    '6fb3': 'EF_VBS',
+    '6fb4': 'EF_VBSS',
+    '6fb5': 'EF_eMLPP',
+    '6fb6': 'EF_AAeM',
+    '6fb7': 'EF_ECC',
+    '6fc5': 'EF_PNN',
+    '6fc6': 'EF_OPL',
+    '6fc9': 'EF_MBI',
+    '6fca': 'EF_MWIS',
+    '6fcb': 'EF_CFIS',
+    '6fcd': 'EF_SPDI',
+    '6fce': 'EF_MMSN',
+    '6fd0': 'EF_MMSICP',
+    '6fd1': 'EF_MMSUP',
+    '6fd2': 'EF_MMSUCP',
+
+    # USIM (TS 31.102) — ADF_USIM
+    '6f01': 'EF_eAKA',
+    '6f02': 'EF_IMPI',   # ISIM EF_IMPI (USIM reuses 6F02 for EF_OCST)
+    '6f06': 'EF_ARR',
+    '6f08': 'EF_Keys',
+    '6f09': 'EF_KeysPS',  # ISIM EF_P-CSCF also reuses 6F09
+    '6f55': 'EF_EXT4',
+    '6f56': 'EF_EST',
+    '6f57': 'EF_ACL',
+    '6f5b': 'EF_START-HFN',
+    '6f5c': 'EF_THRESHOLD',
+    '6f60': 'EF_PLMNwAcT',
+    '6f61': 'EF_OPLMNwAcT',
+    '6f62': 'EF_HPLMNwAcT',
+    '6f65': 'EF_RPLMNAcT',
+    '6f73': 'EF_PSLOCI',
+    '6f80': 'EF_ICI',
+    '6f81': 'EF_OCI',
+    '6f82': 'EF_ICT',
+    '6f83': 'EF_OCT',
+    '6fc4': 'EF_NETPAR',
+    '6fc7': 'EF_MBDN',
+    '6fc8': 'EF_EXT6',
+    '6fcc': 'EF_EXT7',
+    '6fcf': 'EF_EXT8',
+    '6fd3': 'EF_NIA',
+    '6fd4': 'EF_VGCSCA',
+    '6fd5': 'EF_VBSCA',
+    '6fd6': 'EF_GBABP',
+    '6fd7': 'EF_MSK',
+    '6fd8': 'EF_MUK',
+    '6fd9': 'EF_EHPLMN',
+    '6fda': 'EF_GBANL',
+    '6fdb': 'EF_EHPLMNPI',
+    '6fdd': 'EF_NAFKCA',
+    '6fde': 'EF_SPNI',
+    '6fdf': 'EF_PNNI',
+    '6fe2': 'EF_NCP-IP',
+    '6fe3': 'EF_EPSLOCI',
+    '6fe4': 'EF_EPSNSC',
+    '6fe6': 'EF_UFC',
+    '6fe8': 'EF_NASCONFIG',
+    '6fec': 'EF_PWS',
+    '6fed': 'EF_FDNURI',
+    '6fee': 'EF_BDNURI',
+    '6fef': 'EF_SDNURI',
+    '6ff1': 'EF_IPS',
+    '6ff3': 'EF_ePDGId',
+    '6ff4': 'EF_ePDGSelection',
+    '6ff5': 'EF_ePDGIdEm',
+    '6ff6': 'EF_ePDGSelectionEm',
+    '6ff7': 'EF_FromPreferred',
+    '6ff8': 'EF_IMSConfigData',
+    '6ffa': 'EF_WebRTCURI',
+    '6ffc': 'EF_XCAPConfigData',
+    '6ffd': 'EF_EARFCNList',
+    '6ffe': 'EF_MuDMiDConfigData',
+
+    # ISIM (TS 31.103) — ADF_ISIM
+    '6f03': 'EF_DOMAIN',
+    '6f04': 'EF_IMPU',
+    '6f0a': 'EF_GBAUAPI',
+    '6f0b': 'EF_IMSDCI',
+     '6fe7': 'EF_UICCIARI',
 }
+
+
+# DF/ADF children (child FID → name), for context-aware SELECT-path
+# resolution.  The '4Fxx' files are only meaningful within their parent
+# DF, and many FIDs collide across DFs (e.g. '4F01' differs between
+# DF_ProSe, DF_5GS, DF_MCS, DF_V2X, DF_SNPN), so they cannot live in the
+# flat KNOWN_FIDS table.  Sourced from pySim (TS 31.102 / TS 31.102 telecom).
+DF_CHILDREN = {
+    '7f10': {  # DF_TELECOM
+        '5f3a': 'DF_PHONEBOOK',
+        '5f3b': 'DF_MULTIMEDIA',
+        '5f3d': 'DF_MCS',
+        '5f3e': 'DF_V2X',
+    },
+    '5f3a': {  # DF_PHONEBOOK
+        '4f22': 'EF_PSC',
+        '4f23': 'EF_CC',
+        '4f24': 'EF_PUID',
+        '4f30': 'EF_PBR',
+    },
+    '5f3b': {  # DF_GSM_ACCESS (ADF) + DF_MULTIMEDIA (DF_TELECOM) share 5F3B
+        '4f20': 'EF_Kc',
+        '4f52': 'EF_KcGPRS',
+        '4f63': 'EF_CPBCCH',
+        '4f64': 'EF_InvScan',
+        '4f47': 'EF_MML',
+        '4f48': 'EF_MMDF',
+    },
+    '5f3d': {  # DF_MCS
+        '4f01': 'EF_MST',
+        '4f02': 'EF_MCS_CONFIG',
+    },
+    '5f3e': {  # DF_V2X
+        '4f01': 'EF_VST',
+        '4f02': 'EF_V2X_CONFIG',
+    },
+    '5f40': {  # DF_WLAN
+        '4f41': 'EF_Pseudo',
+        '4f42': 'EF_UPLMNWLAN',
+        '4f43': 'EF_OPLMNWLAN',
+        '4f44': 'EF_UWSIDL',
+        '4f45': 'EF_OWSIDL',
+        '4f46': 'EF_WRI',
+        '4f47': 'EF_HWSIDL',
+        '4f48': 'EF_WEHPLMNPI',
+        '4f49': 'EF_WHPI',
+        '4f4a': 'EF_WLRPLMN',
+        '4f4b': 'EF_HPLMNDAI',
+    },
+    '5f50': {  # DF_HNB
+        '4f81': 'EF_ACSGL',
+        '4f82': 'EF_CSGT',
+        '4f83': 'EF_HNBN',
+        '4f84': 'EF_OCSGL',
+        '4f85': 'EF_OCSGT',
+        '4f86': 'EF_OHNBN',
+    },
+    '5f90': {  # DF_ProSe
+        '4f01': 'EF_PROSE_MON',
+        '4f02': 'EF_PROSE_ANN',
+        '4f03': 'EF_PROSEFUNC',
+        '4f04': 'EF_PROSE_RADIO_COM',
+        '4f05': 'EF_PROSE_RADIO_MON',
+        '4f06': 'EF_PROSE_RADIO_ANN',
+        '4f07': 'EF_PROSE_POLICY',
+        '4f08': 'EF_PROSE_PLMN',
+        '4f09': 'EF_PROSE_GC',
+        '4f10': 'EF_PST',
+        '4f11': 'EF_UIRC',
+        '4f12': 'EF_PROSE_GM_DISCOVERY',
+        '4f13': 'EF_PROSE_RELAY',
+        '4f14': 'EF_PROSE_RELAY_DISCOVERY',
+    },
+    '5fc0': {  # DF_5GS
+        '4f01': 'EF_5GS3GPPLOCI',
+        '4f02': 'EF_5GSN3GPPLOCI',
+        '4f03': 'EF_5GS3GPPNSC',
+        '4f04': 'EF_5GSN3GPPNSC',
+        '4f05': 'EF_5GAUTHKEYS',
+        '4f06': 'EF_UAC_AIC',
+        '4f07': 'EF_SUCI_Calc_Info',
+        '4f08': 'EF_OPL5G',
+        '4f09': 'EF_SUPI_NAI',
+        '4f0a': 'EF_Routing_Indicator',
+        '4f0b': 'EF_URSP',
+        '4f0c': 'EF_TN3GPPSNN',
+        '4f0d': 'EF_CAG',
+        '4f0e': 'EF_SOR-CMCI',
+        '4f0f': 'EF_DRI',
+        '4f10': 'EF_5GSEDRX',
+        '4f11': 'EF_5GNSWO_CONF',
+        '4f15': 'EF_MCHPPLMN',
+        '4f16': 'EF_KAUSF_DERIVATION',
+    },
+    '5fd0': {  # DF_SAIP
+        '4f01': 'EF_SUCI_Calc_Info',
+    },
+    '5fe0': {  # DF_SNPN
+        '4f01': 'EF_PWS_SNPN',
+        '4f02': 'EF_NID',
+    },
+    '5ff0': {  # DF_5G_ProSe
+        '4f02': 'EF_5G_PROSE_DD',
+        '4f03': 'EF_5G_PROSE_DC',
+        '4f04': 'EF_5G_PROSE_U2NRU',
+        '4f05': 'EF_5G_PROSE_RU',
+        '4f06': 'EF_5G_PROSE_UIR',
+        '4f07': 'EF_5G_PROSE_U2URU',
+        '4f08': 'EF_5G_PROSE_EU',
+    },
+    '5ff1': {  # DF_5MBSUECONFIG
+        '4f01': 'EF_5MBSUECONFIG',
+    },
+}
+
+
+def _decode_select_path(body_hex):
+    """Decode a SELECT path body into a human-readable path.
+
+    Splits the body into 2-byte FIDs and names each component, tracking
+    the parent DF so DF-specific children (e.g. '4Fxx') resolve against
+    the correct DF.  '7fff' is the implicit FID for the current
+    application's ADF, whose children are the flat KNOWN_FIDS files.
+    """
+    pairs = [body_hex[i:i + 4] for i in range(0, len(body_hex), 4)]
+    parts = []
+    parent = None
+    for p in pairs:
+        if p == '7fff':
+            parts.append('current ADF')
+            parent = None
+            continue
+        name = None
+        if parent and parent in DF_CHILDREN:
+            name = DF_CHILDREN[parent].get(p)
+        if name is None:
+            name = KNOWN_FIDS.get(p)
+        parts.append(name if name else p.upper())
+        parent = p if p in DF_CHILDREN else None
+    return '/'.join(parts)
 
 
 # ──────────────────── Per-INS specifications ────────────────────
@@ -160,11 +427,10 @@ APDU_SPEC = {
         'p1': {
             0x00: 'DF/EF/MF by file ID',
             0x01: 'Child DF',
-            0x02: 'EF under current DF',
             0x03: 'Parent DF',
             0x04: 'Application DF by name',
             0x08: 'Path from MF',
-            0x09: 'Application by AID',
+            0x09: 'Path from current DF',
         },
         'p2': {
             0x00: 'No indication',
@@ -663,8 +929,12 @@ def _decode_datetime(val):
     if len(val) < 7:
         return None
     b = val[:7]
+    if any((x >> 4) > 9 or (x & 0x0F) > 9 for x in b[:6]):
+        return None
     bcd = lambda x: (x >> 4) * 10 + (x & 0x0F)
     yy, mm, dd, hh, mi, ss = (bcd(x) for x in b[:6])
+    if not (1 <= mm <= 12 and 1 <= dd <= 31 and hh <= 23 and mi <= 59 and ss <= 59):
+        return None
     tz_raw = b[6]
     if (tz_raw & 0x0F) == 0x0F:
         tz_str = 'unknown'
@@ -713,6 +983,17 @@ def _decode_local_info(tag, value):
     return None
 
 
+# TS 102 223 §8.8 — Duration data object: [time unit][time interval]
+_TIME_UNITS = {0x00: 'minutes', 0x01: 'seconds', 0x02: 'tenths of seconds'}
+
+
+def _decode_duration(value):
+    """Decode a Duration data object value (time unit + time interval)."""
+    if len(value) < 2:
+        return None
+    return {'value': value[1], 'unit': _TIME_UNITS.get(value[0], f'unit 0x{value[0]:02X}')}
+
+
 def _decode_tr_response(body):
     """Decode the TLVs of a TERMINAL RESPONSE body.
 
@@ -728,8 +1009,8 @@ def _decode_tr_response(body):
             result['code'] = f'0x{code:02X}'
             result['name'] = TR_RESULTS.get(code)
             result['raw'] = value.hex().upper()
-        elif tag == 0x04 and len(value) >= 2:  # Duration (POLL INTERVAL)
-            result['duration'] = (value[0] << 8) | value[1]
+        elif tag == 0x04:  # Duration (POLL INTERVAL)
+            result['duration'] = _decode_duration(value)
         elif tag == 0x05 and value:  # Item Identifier (SELECT ITEM)
             result['item_identifier'] = value[0]
         else:
@@ -1001,6 +1282,177 @@ def _decode_dcs(dcs):
     return encoding, (dcs & 0x03)
 
 
+def _decode_dcs_full(dcs):
+    """Decode TP-DCS into a rich dict (TS 23.038 §4).
+
+    Returns encoding/msg_class (same as _decode_dcs) plus the coding
+    group name and group-specific flags: compression, message class
+    presence, and Message Waiting Indication details.
+    """
+    encoding, msg_class = _decode_dcs(dcs)
+    result = {'hex': f'{dcs:02x}', 'encoding': encoding, 'msg_class': msg_class}
+    group = dcs >> 4
+    if group in (0x0, 0x1):
+        result['group'] = ('General Data Coding indication'
+                           if group == 0 else 'Message Marked for Automatic Deletion')
+        result['compressed'] = bool(dcs & 0x20)
+        result['has_class'] = bool(dcs & 0x10)
+    elif group in (0xC, 0xD, 0xE):
+        result['group'] = 'Message Waiting Indication'
+        result['action'] = 'discard' if group == 0xC else 'store'
+        result['sense'] = 'active' if (dcs & 0x08) else 'inactive'
+        result['indication'] = {0: 'voicemail', 1: 'fax', 2: 'email', 3: 'other'}.get(dcs & 0x03)
+    elif group == 0xF:
+        result['group'] = 'Data coding / message class'
+    else:  # 0x8..0xB reserved
+        result['group'] = 'reserved'
+    return result
+
+
+# TS 23.040 §9.2.3.9 — TP-Protocol-Identifier values (SMS-DELIVER / SMS-SUBMIT)
+PID_NAMES = {
+    0x00: 'SME-to-SME (implicit)',
+    0x20: 'Telematic: implicit',
+    0x21: 'Telematic: telex',
+    0x22: 'Telematic: group 3 telefax',
+    0x23: 'Telematic: group 4 telefax',
+    0x24: 'Telematic: voice telephone',
+    0x25: 'Telematic: ERMES',
+    0x26: 'Telematic: national paging',
+    0x27: 'Telematic: videotex',
+    0x28: 'Telematic: teletex (unspecified)',
+    0x2A: 'Telematic: teletex (CSPDN)',
+    0x2D: 'Telematic: teletex (ISDN)',
+    0x30: 'Message handling facility',
+    0x31: 'X.400-based MHS',
+    0x32: 'Internet Electronic Mail',
+    0x3F: 'GSM/UMTS mobile station',
+    0x40: 'Short Message Type 0',
+    0x41: 'Replace Short Message Type 1',
+    0x42: 'Replace Short Message Type 2',
+    0x43: 'Replace Short Message Type 3',
+    0x44: 'Replace Short Message Type 4',
+    0x45: 'Replace Short Message Type 5',
+    0x46: 'Replace Short Message Type 6',
+    0x47: 'Replace Short Message Type 7',
+    0x48: 'Device Triggering Short Message',
+    0x5F: 'Return Call Message',
+    0x7C: 'ANSI-136 R-DATA',
+    0x7D: 'ME Data download',
+    0x7E: 'ME De-personalization Short Message',
+    0x7F: '(U)SIM Data download',
+}
+
+
+def _decode_pid(pid):
+    return PID_NAMES.get(pid)
+
+
+# TS 23.040 §9.2.3.24 — User Data Header Information Element Identifiers
+IEI_NAMES = {
+    0x00: 'Concatenated short messages, 8-bit reference number',
+    0x01: 'Special SMS Message Indication',
+    0x04: 'Application port addressing scheme, 8 bit address',
+    0x05: 'Application port addressing scheme, 16 bit address',
+    0x06: 'SMSC Control Parameters',
+    0x07: 'UDH Source Indicator',
+    0x08: 'Concatenated short message, 16-bit reference number',
+    0x09: 'Wireless Control Message Protocol',
+    0x0A: 'Text Formatting',
+    0x0B: 'Predefined Sound',
+    0x0C: 'User Defined Sound',
+    0x0D: 'Predefined Animation',
+    0x0E: 'Large Animation',
+    0x0F: 'Small Animation',
+    0x10: 'Large Picture',
+    0x11: 'Small Picture',
+    0x12: 'Variable Picture',
+    0x13: 'User prompt indicator',
+    0x14: 'Extended Object',
+    0x15: 'Reused Extended Object',
+    0x16: 'Compression Control',
+    0x17: 'Object Distribution Indicator',
+    0x18: 'Standard WVG object',
+    0x19: 'Character Size WVG object',
+    0x1A: 'Extended Object Data Request Command',
+    0x20: 'RFC 5322 E-Mail Header',
+    0x21: 'Hyperlink format element',
+    0x22: 'Reply Address Element',
+    0x23: 'Enhanced Voice Mail Information',
+    0x24: 'National Language Single Shift',
+    0x25: 'National Language Locking Shift',
+    0x26: 'Filler',
+}
+
+_SPECIAL_SMS_TYPES = {0: 'voice', 1: 'fax', 2: 'email', 3: 'other'}
+
+
+def _decode_udh(udh):
+    """Parse a TP-User-Data-Header byte string into a list of IEI dicts.
+
+    Each element is ``{'iei', 'name', 'length', 'hex'}`` plus an IE-specific
+    ``'data'`` dict for the common cases (concatenation, application port,
+    special SMS indication).
+    """
+    elements = []
+    i = 0
+    while i + 2 <= len(udh):
+        iei = udh[i]
+        length = udh[i + 1]
+        data = udh[i + 2:i + 2 + length]
+        i += 2 + length
+        el = {'iei': f'0x{iei:02X}', 'name': IEI_NAMES.get(iei),
+              'length': length, 'hex': data.hex().upper()}
+        if iei == 0x00 and length >= 3:  # concatenated, 8-bit reference
+            el['data'] = {'reference': data[0], 'max': data[1], 'seq': data[2]}
+        elif iei == 0x08 and length >= 4:  # concatenated, 16-bit reference
+            el['data'] = {'reference': int.from_bytes(data[:2], 'big'),
+                          'max': data[2], 'seq': data[3]}
+        elif iei == 0x01 and length >= 2:  # special SMS message indication
+            el['data'] = {'store': bool(data[0] & 0x80),
+                          'indication': _SPECIAL_SMS_TYPES.get(data[0] & 0x03),
+                          'count': data[1]}
+        elif iei == 0x04 and length >= 2:  # application port, 8-bit
+            el['data'] = {'dest_port': data[0], 'orig_port': data[1]}
+        elif iei == 0x05 and length >= 4:  # application port, 16-bit
+            el['data'] = {'dest_port': int.from_bytes(data[:2], 'big'),
+                          'orig_port': int.from_bytes(data[2:4], 'big')}
+        elements.append(el)
+    return elements
+
+
+def _decode_vp_relative(v):
+    """Decode a 1-octet TP-Validity-Period (relative format, TS 23.040 §9.2.3.12.1)."""
+    if 0 <= v <= 143:
+        return f'{(v + 1) * 5} min'
+    if 144 <= v <= 167:
+        hours = 12 + (v - 143) // 2
+        mins = ((v - 143) % 2) * 30
+        return f'{hours}h{mins:02d}m'
+    if 168 <= v <= 196:
+        return f'{v - 166} d'
+    if 197 <= v <= 255:
+        return f'{v - 192} wk'
+    return None
+
+
+def _decode_8bit_text(data):
+    """Best-effort printable text for 8-bit TP-UD data.
+
+    If every byte is ASCII (<= 0x7F) or every byte has the high bit set
+    (>= 0x80, latin-1), decode to a printable string with non-printable
+    characters replaced by '·'.  Mixed ranges are treated as binary and
+    return None.
+    """
+    if not data:
+        return None
+    if all(b <= 0x7F for b in data):
+        return ''.join(chr(b) if 0x20 <= b < 0x7F else '\u00b7' for b in data)
+    if all(b >= 0x80 for b in data):
+        return ''.join(chr(b) if b >= 0xA0 else '\u00b7' for b in data)
+    return None
+
+
 def _decode_gsm7_octets(data):
     """Decode 8-bit-per-octet GSM 7-bit default alphabet text (TS 102 221)."""
     out = []
@@ -1085,7 +1537,16 @@ def _decode_sm_tpdu(data):
             result['pid'] = data[i]
             result['dcs'] = data[i + 1]
             i += 2
-        i += 7  # TP-SCTS (service centre time stamp)
+            pid_name = _decode_pid(result['pid'])
+            if pid_name:
+                result['pid_name'] = pid_name
+            result['dcs_info'] = _decode_dcs_full(result['dcs'])
+            result['encoding'] = result['dcs_info']['encoding']
+            result['msg_class'] = result['dcs_info']['msg_class']
+        scts = _decode_datetime(data[i:i + 7])  # TP-SCTS (service centre time stamp)
+        if scts:
+            result['scts'] = scts
+        i += 7
         if i < len(data):
             udl = data[i]
             i += 1
@@ -1106,9 +1567,24 @@ def _decode_sm_tpdu(data):
             result['pid'] = data[i]
             result['dcs'] = data[i + 1]
             i += 2
-        if vpf in (1, 3):  # 1-octet validity period
+            pid_name = _decode_pid(result['pid'])
+            if pid_name:
+                result['pid_name'] = pid_name
+            result['dcs_info'] = _decode_dcs_full(result['dcs'])
+            result['encoding'] = result['dcs_info']['encoding']
+            result['msg_class'] = result['dcs_info']['msg_class']
+        if vpf == 1:  # relative: 1-octet validity period
+            if i < len(data):
+                vp = _decode_vp_relative(data[i])
+                if vp:
+                    result['vp'] = vp
             i += 1
-        elif vpf == 2:  # 7-octet relative validity period
+        elif vpf == 2:  # absolute: 7-octet validity period (semi-octet time)
+            vp = _decode_datetime(data[i:i + 7])
+            result['vp'] = vp if vp else data[i:i + 7].hex().upper()
+            i += 7
+        elif vpf == 3:  # enhanced: 7-octet validity period
+            result['vp'] = data[i:i + 7].hex().upper()
             i += 7
         if i < len(data):
             udl = data[i]
@@ -1131,7 +1607,8 @@ def _decode_ud(ud, udl, dcs, udhi, result):
 
     if udhi and ud:
         udhl = ud[0]
-        result['udh'] = ud[1:1 + udhl].hex().upper()
+        result['udhl'] = udhl
+        result['udh'] = _decode_udh(ud[1:1 + udhl])
         body = ud[1 + udhl:]
         if encoding == 'GSM 7-bit':
             fill_bits = (udhl + 1) * 8
@@ -1141,6 +1618,9 @@ def _decode_ud(ud, udl, dcs, udhi, result):
             result['text'] = body[:udl].decode('utf-16-be', errors='replace')
         else:
             result['payload'] = body[:udl].hex().upper()
+            text = _decode_8bit_text(body[:udl])
+            if text is not None:
+                result['text'] = text
     else:
         if encoding == 'GSM 7-bit':
             result['text'] = _decode_gsm7(ud, udl)
@@ -1148,6 +1628,9 @@ def _decode_ud(ud, udl, dcs, udhi, result):
             result['text'] = ud[:udl].decode('utf-16-be', errors='replace')
         else:
             result['payload'] = ud[:udl].hex().upper()
+            text = _decode_8bit_text(ud[:udl])
+            if text is not None:
+                result['text'] = text
 
     return result
 
@@ -1221,7 +1704,7 @@ def _decode_envelope(body):
         for t, _l, v in inner:
             if t == 0x06:
                 result['smsc'] = _decode_bcd_address(v)
-            elif t == 0x86:  # SMS TPDU (SMS-DELIVER)
+            elif t in (0x0B, 0x8B):  # SMS TPDU (SMS-DELIVER)
                 result['tpdu'] = _decode_sm_tpdu(v)
             elif t == 0x02:
                 result['device_ids'] = v.hex().upper()
@@ -1285,8 +1768,8 @@ def _decode_proactive(body):
             items.append({'id': value[0], 'text': _decode_annex_a(value[1:])})
         elif base == _P_SMS_TPDU and value:
             result['tpdu'] = _decode_sm_tpdu(value)
-        elif base == _P_DURATION and len(value) >= 2:
-            result['duration'] = (value[0] << 8) | value[1]
+        elif base == _P_DURATION:
+            result['duration'] = _decode_duration(value)
         elif base == _P_RESPONSE_LEN and len(value) >= 2:
             result['response_length'] = {'min': value[0], 'max': value[1]}
         elif base == _P_EVENT_LIST and value:
@@ -1303,6 +1786,95 @@ def _decode_proactive(body):
 
 
 # ──────────────────── Decode entry point ────────────────────
+
+def _build_summary(result):
+    """Build a concise human-readable description of a decoded command.
+
+    Used to replace raw hex in the APDU list view.  Returns None when
+    nothing meaningful is extractable (caller falls back to raw hex).
+    Sensitive bodies (PIN, AUTH) are never included.
+    """
+    parts = []
+    ins = result.get('ins_hex')
+
+    p1 = result.get('p1')
+    p2 = result.get('p2')
+    p1txt = p2txt = None
+    if 'p1p2' in result:
+        p1txt = f"{result['p1p2']['label']}: 0x{result['p1p2']['value']:04X}"
+    else:
+        if p1:
+            p1txt = p1.get('name')
+            if not p1txt and p1.get('label') is not None and p1.get('value') is not None:
+                p1txt = f"{p1['label']}: {p1['value']}"
+            if not p1txt and p1.get('bits'):
+                p1txt = ', '.join(p1['bits'])
+        if p2:
+            p2txt = p2.get('name')
+            if not p2txt and p2.get('bits'):
+                p2txt = ', '.join(p2['bits'])
+
+    body = result.get('body')
+    bodytxt = None
+    if body and ins == 'a4':  # SELECT → FID/AID is the object of the command
+        bodytxt = body['hex'].upper()
+        if body.get('note'):
+            bodytxt = f"{bodytxt} ({body['note']})"
+
+    if ins == 'a4' and p1txt and bodytxt:
+        parts.append(f"{p1txt}: {bodytxt}")
+        if p2txt and p2txt != 'No indication':
+            parts.append(p2txt)
+    else:
+        if p1txt and p1txt != 'No indication':
+            parts.append(p1txt)
+        if p2txt and p2txt != 'No indication':
+            parts.append(p2txt)
+        if bodytxt:
+            parts.append(bodytxt)
+
+    cmd = result.get('cmd')
+    if cmd:
+        if cmd.get('context'):
+            parts.append(cmd['context'])
+        if cmd.get('title'):
+            parts.append(cmd['title'])
+        items = cmd.get('items')
+        if items:
+            n = len(items)
+            parts.append(f"{n} item{'s' if n != 1 else ''}")
+        if cmd.get('text'):
+            parts.append(cmd['text'])
+        if cmd.get('smsc'):
+            parts.append(f"SMSC {cmd['smsc']}")
+        if cmd.get('events'):
+            parts.append(', '.join(cmd['events']))
+        if cmd.get('address'):
+            parts.append(f"to {cmd['address']}")
+        duration = cmd.get('duration')
+        if isinstance(duration, dict) and duration.get('value') is not None:
+            parts.append(f"{duration['value']} {duration['unit']}")
+        tpdu = cmd.get('tpdu')
+        if tpdu:
+            s = tpdu.get('mti', '')
+            if tpdu.get('oa'):
+                s += f" from {tpdu['oa']}"
+            if tpdu.get('da'):
+                s += f" to {tpdu['da']}"
+            if tpdu.get('text'):
+                s += f" \u00ab{tpdu['text']}\u00bb"
+            parts.append(s)
+
+    if result.get('response_to'):
+        parts.append('\u2192 ' + result['response_to'])
+    if result.get('response_for'):
+        parts.append('response for ' + result['response_for'])
+    response = result.get('response')
+    if response and response.get('name'):
+        parts.append(response['name'])
+
+    return ', '.join(parts) if parts else None
+
 
 def decode_message(raw_data, prev=None):
     """Decode a raw TPDU byte string into a structured dict.
@@ -1373,6 +1945,9 @@ def decode_message(raw_data, prev=None):
             if h in fids:
                 result['body']['note'] = fids[h]
 
+        if ins == 0xA4 and p1 in (0x08, 0x09):  # SELECT by path (from MF / current DF)
+            result['body']['note'] = _decode_select_path(body.hex())
+
         if ins == 0x14:
             response_to = decode_tr_command(body)
             if response_to:
@@ -1405,6 +1980,8 @@ def decode_message(raw_data, prev=None):
                     result['response'] = response
         else:
             result['response_for'] = None
+
+    result['summary'] = _build_summary(result)
 
     return result
 
@@ -1454,6 +2031,217 @@ def decode_fidi(raw_data):
     }
 
 
+# ──────────────────── ATR / PPS decoding (ISO 7816-3) ────────────────────
+
+# TA1/PPS1: Fi (clock rate conversion factor), f(max), Di (baud rate adjustment)
+_ATR_FI = {0: 372, 1: 372, 2: 558, 3: 744, 4: 1116, 5: 1488, 6: 1860,
+           9: 512, 10: 768, 11: 1024, 12: 1536, 13: 2048}
+_ATR_FMAX = {0: 4, 1: 5, 2: 6, 3: 8, 4: 12, 5: 16, 6: 20,
+             9: 5, 10: 7.5, 11: 10, 12: 15, 13: 20}
+_ATR_DI = {1: 1, 2: 2, 3: 4, 4: 8, 5: 16, 6: 32, 7: 64, 8: 12, 9: 20}
+
+_T_PROTOCOLS = {0: 'T=0', 1: 'T=1', 2: 'T=2', 3: 'T=3', 4: 'T=4', 14: 'T=14', 15: 'T=15'}
+
+# TA3 (first TA for T=15): clock stop indicator (bits 8-7) + class indicator (bits 1-3)
+_CLOCK_STOP = {0: 'clock stop not supported', 1: 'state L preferred',
+               2: 'state H preferred', 3: 'no preference'}
+_CLASS_BITS = {0x01: 'A', 0x02: 'B', 0x04: 'C'}
+
+
+def _bit_swap(b):
+    """Reverse the bits of a byte (inverse convention ATR decoding)."""
+    return int(f'{b:08b}'[::-1], 2)
+
+
+def _fidi_dict(fi, di):
+    """Decode an Fi/Di nibble pair into a display dict."""
+    entry = {'fi': fi, 'di': di}
+    f = _ATR_FI.get(fi)
+    d = _ATR_DI.get(di)
+    if f is not None:
+        entry['f'] = f
+    if d is not None:
+        entry['d'] = d
+    if f is not None and d is not None:
+        f_div_d = f / d
+        entry['f_div_d'] = int(f_div_d) if f_div_d == int(f_div_d) else f_div_d
+    if fi in _ATR_FMAX:
+        entry['f_max'] = _ATR_FMAX[fi]
+    return entry
+
+
+def _decode_historical(hist):
+    """Decode ATR historical bytes (ISO 7816-4 §8.1.1)."""
+    result = {'raw': hist.hex().upper()}
+    cat = hist[0]
+    if cat == 0x80 and len(hist) >= 3:
+        result['category'] = 'status information (life cycle)'
+        result['sw'] = f'{hist[1]:02X}{hist[2]:02X}'
+        life_cycle = _LIFE_CYCLE.get(hist[2])
+        if life_cycle:
+            result['life_cycle'] = life_cycle
+    elif cat == 0x8F:
+        result['category'] = 'TLV list'
+    elif 0x00 <= cat <= 0x7F or 0x90 <= cat <= 0x9F:
+        result['category'] = 'proprietary'
+    elif 0x81 <= cat <= 0x8E or 0xA0 <= cat <= 0xFE:
+        result['category'] = 'reserved'
+    elif cat == 0xFF:
+        result['category'] = 'default'
+    else:
+        result['category'] = f'0x{cat:02X}'
+    return result
+
+
+def _decode_atr(data):
+    """Decode an Answer-To-Reset (ISO 7816-3 §8) into a structured dict."""
+    if not data:
+        return {'type': 'atr', 'raw': ''}
+    ts = data[0]
+    raw = data.hex().upper()
+    if ts not in (0x3B, 0x3F):
+        return {'type': 'atr', 'convention': 'unknown', 'raw': raw}
+    inverse = ts == 0x3F
+    body = data[1:]
+    if inverse:
+        body = bytes(_bit_swap(b) for b in body)
+
+    result = {
+        'type': 'atr',
+        'ts': f'{ts:02X}',
+        'convention': 'inverse' if inverse else 'direct',
+        'raw': raw,
+    }
+    if not body:
+        return result
+
+    t0 = body[0]
+    result['t0'] = f'{t0:02X}'
+    result['historical_len'] = t0 & 0x0F
+
+    interface = []
+    protocols = []
+    flags = t0 & 0xF0
+    i = 1
+    level = 1
+    cur_t = None  # protocol T governing the TA/TB/TC bytes at this level (None = global)
+
+    while flags and i < len(body):
+        if flags & 0x10:  # TA
+            b = body[i]
+            i += 1
+            if level == 1:
+                entry = {'name': 'TA1', 'hex': f'{b:02X}'}
+                entry.update(_fidi_dict(b >> 4, b & 0x0F))
+            elif level == 2:
+                entry = {'name': 'TA2', 'hex': f'{b:02X}',
+                         'specific': bool(b & 0x10),
+                         'protocol': _T_PROTOCOLS.get(b & 0x0F, f'T={b & 0x0F}')}
+            elif cur_t == 15:  # first TA for T=15 → clock stop + class indicator
+                classes = [name for bit, name in _CLASS_BITS.items() if b & bit]
+                entry = {'name': f'TA{level}', 'hex': f'{b:02X}',
+                         'clock_stop': _CLOCK_STOP.get((b >> 6) & 0x03),
+                         'classes': classes}
+            else:  # TA3 for T=1 → IFSC
+                entry = {'name': f'TA{level}', 'hex': f'{b:02X}', 'ifsc': b}
+            interface.append(entry)
+        if flags & 0x20:  # TB
+            b = body[i]
+            i += 1
+            if level == 1:
+                interface.append({'name': 'TB1', 'hex': f'{b:02X}',
+                                  'programming': 'not used' if b == 0 else f'0x{b:02X}'})
+            elif level == 2:
+                interface.append({'name': 'TB2', 'hex': f'{b:02X}',
+                                  'programming': 'not used' if b == 0 else f'0x{b:02X}'})
+            elif cur_t == 15:  # first TB for T=15 → SPU
+                interface.append({'name': f'TB{level}', 'hex': f'{b:02X}',
+                                  'spu': 'not used' if b == 0 else f'0x{b:02X}'})
+            else:  # TB3 for T=1 → BWI/CWI
+                interface.append({'name': f'TB{level}', 'hex': f'{b:02X}',
+                                  'bwi': b >> 4, 'cwi': b & 0x0F})
+        if flags & 0x40:  # TC
+            b = body[i]
+            i += 1
+            if level == 1:
+                interface.append({'name': 'TC1', 'hex': f'{b:02X}', 'extra_guard_time': b})
+            elif level == 2:
+                interface.append({'name': 'TC2', 'hex': f'{b:02X}', 'work_waiting_time': b})
+            else:
+                interface.append({'name': f'TC{level}', 'hex': f'{b:02X}'})
+        if flags & 0x80:  # TD
+            b = body[i]
+            i += 1
+            cur_t = b & 0x0F
+            protocols.append(_T_PROTOCOLS.get(cur_t, f'T={cur_t}'))
+            flags = b & 0xF0
+            level += 1
+        else:
+            flags = 0
+
+    if interface:
+        result['interface'] = interface
+    if protocols:
+        result['protocols'] = protocols
+
+    k = result['historical_len']
+    if k and i + k <= len(body):
+        result['historical'] = _decode_historical(body[i:i + k])
+    i += k
+
+    # TCK present unless only T=0 is proposed (ISO 7816-3 §8.2.5).
+    only_t0 = not protocols or protocols == ['T=0']
+    if not only_t0 and i < len(body):
+        tck = body[i]
+        check = 0
+        for b in body[:i]:
+            check ^= b
+        result['tck'] = f'{tck:02X}'
+        result['tck_valid'] = check == tck
+
+    return result
+
+
+def _decode_pps(data):
+    """Decode a Protocol and Parameter Selection exchange (ISO 7816-3 §9.2)."""
+    if not data:
+        return {'type': 'pps', 'raw': ''}
+    raw = data.hex().upper()
+    result = {'type': 'pps', 'raw': raw}
+    if data[0] != 0xFF:
+        result['note'] = 'missing PPSS'
+        return result
+    result['ppss'] = 'FF'
+    if len(data) < 2:
+        return result
+    pps0 = data[1]
+    result['pps0'] = f'{pps0:02X}'
+    result['protocol'] = _T_PROTOCOLS.get(pps0 & 0x0F, f'T={pps0 & 0x0F}')
+    i = 2
+    if pps0 & 0x10 and i < len(data):  # PPS1 → Fi/Di
+        pps1 = data[i]
+        i += 1
+        entry = {'pps1': f'{pps1:02X}'}
+        entry.update(_fidi_dict(pps1 >> 4, pps1 & 0x0F))
+        result['fi_di'] = entry
+    if pps0 & 0x20 and i < len(data):  # PPS2 → SPU
+        pps2 = data[i]
+        i += 1
+        result['pps2'] = f'{pps2:02X}'
+        result['spu'] = 'not used' if pps2 == 0 else f'0x{pps2:02X}'
+    if pps0 & 0x40 and i < len(data):  # PPS3 (reserved)
+        result['pps3'] = f'{data[i]:02X}'
+        i += 1
+    if i < len(data):
+        pck = data[i]
+        check = 0
+        for b in data[:i]:
+            check ^= b
+        result['pck'] = f'{pck:02X}'
+        result['pck_valid'] = check == pck
+    return result
+
+
 def decode_sniff_msg(raw_data, msg_type, flags=0, prev=None):
     """Decode a raw sniff message of the given type.
 
@@ -1470,9 +2258,9 @@ def decode_sniff_msg(raw_data, msg_type, flags=0, prev=None):
     if msg_type == 'fidi' and raw_data:
         return decode_fidi(raw_data)
     if msg_type == 'atr':
-        return {'type': 'atr', 'hex': raw_data.hex() if raw_data else ''}
+        return _decode_atr(raw_data)
     if msg_type == 'pps':
-        return {'type': 'pps', 'hex': raw_data.hex() if raw_data else ''}
+        return _decode_pps(raw_data)
     return None
 
 

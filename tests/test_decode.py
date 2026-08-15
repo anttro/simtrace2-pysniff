@@ -92,6 +92,21 @@ class TestCatDecoding(unittest.TestCase):
         self.assertEqual(r['ins_name'], 'SELECT')
         self.assertNotIn('cat_command', r)
 
+    def test_envelope_sms_pp_download(self):
+        r = decode_message(bytes.fromhex(
+            '80C2000022D120020283810607919740430900F40B1104038154F50004'
+            '260812143000210248699000'))
+        self.assertEqual(r['ins_name'], 'ENVELOPE')
+        self.assertEqual(r['cat_command'], 'SMS-PP DOWNLOAD')
+        cmd = r['cmd']
+        self.assertEqual(cmd['smsc'], '+79043490004')
+        self.assertEqual(cmd['device_ids'], '8381')
+        t = cmd['tpdu']
+        self.assertEqual(t['mti'], 'SMS-DELIVER')
+        self.assertEqual(t['oa'], '455')
+        self.assertEqual(t['text'], 'Hi')
+        self.assertEqual(t['scts'], '2026-08-12 14:30:00 (UTC+03:00)')
+
 
 class TestCommandTypeTables(unittest.TestCase):
     def test_known_values(self):
@@ -267,7 +282,7 @@ class TestTrAdditionalInfo(unittest.TestCase):
         r = decode_message(bytes.fromhex(
             '80140000108103010300020282810301000402011E9000'))
         self.assertEqual(r['response_to'], 'POLL INTERVAL')
-        self.assertEqual(r['response']['duration'], 286)
+        self.assertEqual(r['response']['duration'], {'value': 30, 'unit': 'seconds'})
 
     def test_pli_location_info(self):
         r = decode_message(bytes.fromhex(
@@ -290,6 +305,14 @@ class TestTrAdditionalInfo(unittest.TestCase):
         self.assertEqual(
             _decode_datetime(bytes.fromhex('260812143000FF')),
             '2026-08-12 14:30:00 (UTCunknown)')
+
+    def test_datetime_invalid_bcd(self):
+        from simtrace2_pysniff.server.decode import _decode_datetime
+        self.assertIsNone(_decode_datetime(bytes.fromhex('A505326C333939')))
+
+    def test_datetime_invalid_semantics(self):
+        from simtrace2_pysniff.server.decode import _decode_datetime
+        self.assertIsNone(_decode_datetime(bytes.fromhex('02209121654021')))
 
     def test_pli_language(self):
         from simtrace2_pysniff.server.decode import _decode_local_info, PLI_LANGUAGE
@@ -404,12 +427,14 @@ class TestSmTpdu(unittest.TestCase):
     def test_8bit_no_text(self):
         from simtrace2_pysniff.server.decode import _decode_sm_tpdu
         oa = b'\x91' + self._bcd('79031234567')
+        # Mixed low/high bytes are treated as binary → no text decode.
+        payload = bytes.fromhex('00018081A0FF07')
         tpdu = (b'\x00' + bytes([11]) + oa + b'\x00\x04' + b'\x00' * 7 +
-                b'\x10' + bytes(range(16)))
+                bytes([len(payload)]) + payload)
         r = _decode_sm_tpdu(tpdu)
         self.assertEqual(r['encoding'], '8-bit data')
         self.assertNotIn('text', r)
-        self.assertEqual(r['payload'], '000102030405060708090A0B0C0D0E0F')
+        self.assertEqual(r['payload'], '00018081A0FF07')
 
     def test_sim_data_download(self):
         from simtrace2_pysniff.server.decode import _decode_sm_tpdu
@@ -419,6 +444,139 @@ class TestSmTpdu(unittest.TestCase):
         r = _decode_sm_tpdu(tpdu)
         self.assertEqual(r['pid_name'], 'SIM data download (secured packet)')
         self.assertEqual(r['payload'], '000102030405060708090A0B0C0D0E0F')
+
+    def test_deliver_scts(self):
+        from simtrace2_pysniff.server.decode import _decode_sm_tpdu
+        oa = b'\x91' + self._bcd('79031234567')
+        scts = bytes.fromhex('26081214300021')
+        tpdu = (b'\x00' + bytes([11]) + oa + b'\x00\x00' + scts + b'\x00')
+        r = _decode_sm_tpdu(tpdu)
+        self.assertEqual(r['scts'], '2026-08-12 14:30:00 (UTC+03:00)')
+
+    def test_deliver_pid_name(self):
+        from simtrace2_pysniff.server.decode import _decode_sm_tpdu
+        oa = b'\x91' + self._bcd('79031234567')
+        tpdu = (b'\x00' + bytes([11]) + oa + b'\x48\x00' + b'\x00' * 7 + b'\x00')
+        r = _decode_sm_tpdu(tpdu)
+        self.assertEqual(r['pid_name'], 'Device Triggering Short Message')
+
+    def test_deliver_dcs_info(self):
+        from simtrace2_pysniff.server.decode import _decode_sm_tpdu
+        oa = b'\x91' + self._bcd('79031234567')
+        tpdu = (b'\x00' + bytes([11]) + oa + b'\x00\x11' + b'\x00' * 7 + b'\x00')
+        r = _decode_sm_tpdu(tpdu)
+        self.assertEqual(r['dcs_info']['group'], 'Message Marked for Automatic Deletion')
+        self.assertEqual(r['dcs_info']['has_class'], True)
+        self.assertEqual(r['dcs_info']['msg_class'], 1)
+
+    def test_dcs_mwi(self):
+        from simtrace2_pysniff.server.decode import _decode_dcs_full
+        d = _decode_dcs_full(0xD0)
+        self.assertEqual(d['group'], 'Message Waiting Indication')
+        self.assertEqual(d['action'], 'store')
+        self.assertEqual(d['sense'], 'inactive')
+        self.assertEqual(d['indication'], 'voicemail')
+
+    def test_udh_concat_8bit(self):
+        from simtrace2_pysniff.server.decode import _decode_udh
+        el = _decode_udh(bytes.fromhex('0003A10201'))
+        self.assertEqual(el[0]['name'], 'Concatenated short messages, 8-bit reference number')
+        self.assertEqual(el[0]['data'], {'reference': 0xA1, 'max': 2, 'seq': 1})
+
+    def test_udh_concat_16bit(self):
+        from simtrace2_pysniff.server.decode import _decode_udh
+        el = _decode_udh(bytes.fromhex('080403000201'))
+        self.assertEqual(el[0]['name'], 'Concatenated short message, 16-bit reference number')
+        self.assertEqual(el[0]['data'], {'reference': 0x0300, 'max': 2, 'seq': 1})
+
+    def test_udh_app_port_8bit(self):
+        from simtrace2_pysniff.server.decode import _decode_udh
+        el = _decode_udh(bytes.fromhex('0402B5A5'))
+        self.assertEqual(el[0]['data'], {'dest_port': 0xB5, 'orig_port': 0xA5})
+
+    def test_udh_app_port_16bit(self):
+        from simtrace2_pysniff.server.decode import _decode_udh
+        el = _decode_udh(bytes.fromhex('05040B8423F0'))
+        self.assertEqual(el[0]['data'], {'dest_port': 0x0B84, 'orig_port': 0x23F0})
+
+    def test_udh_special_sms(self):
+        from simtrace2_pysniff.server.decode import _decode_udh
+        el = _decode_udh(bytes.fromhex('01028102'))
+        self.assertEqual(el[0]['data'], {'store': True, 'indication': 'fax', 'count': 2})
+
+    def test_deliver_udh_ucs2(self):
+        from simtrace2_pysniff.server.decode import _decode_sm_tpdu
+        oa = b'\x91' + self._bcd('79031234567')
+        ud = bytes.fromhex('050003A10201') + 'Hi'.encode('utf-16-be')
+        tpdu = (b'\x40' + bytes([11]) + oa + b'\x00\x08' + b'\x00' * 7 +
+                bytes([len(ud)]) + ud)
+        r = _decode_sm_tpdu(tpdu)
+        self.assertEqual(r['udh'][0]['data'], {'reference': 0xA1, 'max': 2, 'seq': 1})
+        self.assertEqual(r['text'], 'Hi')
+
+    def test_submit_vp_relative(self):
+        from simtrace2_pysniff.server.decode import _decode_sm_tpdu
+        da = b'\x81' + self._bcd('999')
+        tpdu = b'\x09' + b'\x2A' + bytes([len(da)]) + da + b'\x00\x00' + b'\x8F' + b'\x00'
+        r = _decode_sm_tpdu(tpdu)
+        self.assertEqual(r['mti'], 'SMS-SUBMIT')
+        self.assertEqual(r['vp'], '720 min')
+
+    def test_submit_vp_absolute(self):
+        from simtrace2_pysniff.server.decode import _decode_sm_tpdu
+        da = b'\x81' + self._bcd('999')
+        scts = bytes.fromhex('26081214300021')
+        tpdu = b'\x11' + b'\x2A' + bytes([len(da)]) + da + b'\x00\x00' + scts + b'\x00'
+        r = _decode_sm_tpdu(tpdu)
+        self.assertEqual(r['vp'], '2026-08-12 14:30:00 (UTC+03:00)')
+
+    def test_submit_no_ud_encoding(self):
+        # Real capture: absolute VP with non-BCD bytes, no TP-UD.
+        from simtrace2_pysniff.server.decode import _decode_sm_tpdu
+        tpdu = bytes.fromhex('11FF038154F50004A505326C333939')
+        r = _decode_sm_tpdu(tpdu)
+        self.assertEqual(r['da'], '455')
+        self.assertEqual(r['encoding'], '8-bit data')
+        self.assertEqual(r['msg_class'], 0)
+        self.assertEqual(r['vp'], 'A505326C333939')
+
+    def test_8bit_ascii_text(self):
+        from simtrace2_pysniff.server.decode import _decode_sm_tpdu
+        oa = b'\x91' + self._bcd('79031234567')
+        payload = b'Hello World'
+        tpdu = (b'\x00' + bytes([11]) + oa + b'\x00\x04' + b'\x00' * 7 +
+                bytes([len(payload)]) + payload)
+        r = _decode_sm_tpdu(tpdu)
+        self.assertEqual(r['encoding'], '8-bit data')
+        self.assertEqual(r['text'], 'Hello World')
+
+    def test_8bit_ascii_ctrl_replaced(self):
+        from simtrace2_pysniff.server.decode import _decode_sm_tpdu
+        oa = b'\x91' + self._bcd('79031234567')
+        payload = b'Hi\x00There'
+        tpdu = (b'\x00' + bytes([11]) + oa + b'\x00\x04' + b'\x00' * 7 +
+                bytes([len(payload)]) + payload)
+        r = _decode_sm_tpdu(tpdu)
+        self.assertEqual(r['text'], 'Hi\u00b7There')
+
+    def test_8bit_high_text(self):
+        from simtrace2_pysniff.server.decode import _decode_sm_tpdu
+        oa = b'\x91' + self._bcd('79031234567')
+        payload = '\u00e9\u00fc\u00f1'.encode('latin-1')
+        tpdu = (b'\x00' + bytes([11]) + oa + b'\x00\x04' + b'\x00' * 7 +
+                bytes([len(payload)]) + payload)
+        r = _decode_sm_tpdu(tpdu)
+        self.assertEqual(r['text'], '\u00e9\u00fc\u00f1')
+
+    def test_8bit_mixed_no_text(self):
+        from simtrace2_pysniff.server.decode import _decode_sm_tpdu
+        oa = b'\x91' + self._bcd('79031234567')
+        payload = b'\x00\x01\xff\xfe'
+        tpdu = (b'\x00' + bytes([11]) + oa + b'\x00\x04' + b'\x00' * 7 +
+                bytes([len(payload)]) + payload)
+        r = _decode_sm_tpdu(tpdu)
+        self.assertNotIn('text', r)
+        self.assertEqual(r['payload'], '0001FFFE')
 
 
 class TestBcdAddress(unittest.TestCase):
@@ -453,7 +611,7 @@ class TestProactiveDecode(unittest.TestCase):
     def test_poll_interval_duration(self):
         r = decode_message(bytes.fromhex(
             '801200000FD00D8103010300820281820402011E9000'))
-        self.assertEqual(r['cmd']['duration'], 286)
+        self.assertEqual(r['cmd']['duration'], {'value': 30, 'unit': 'seconds'})
 
     def test_send_short_message_tpdu(self):
         r = decode_message(bytes.fromhex(
@@ -463,6 +621,18 @@ class TestProactiveDecode(unittest.TestCase):
         self.assertEqual(r['cmd']['type'], 'SEND SHORT MESSAGE')
         self.assertEqual(r['cmd']['tpdu']['mti'], 'SMS-SUBMIT')
         self.assertEqual(r['cmd']['tpdu']['da'], '999')
+
+    def test_send_short_message_rich_tpdu(self):
+        r = decode_message(bytes.fromhex(
+            '801200001AD01881030113008202818305000B0B0101038199F9000402'
+            '48699000'))
+        t = r['cmd']['tpdu']
+        self.assertEqual(r['cmd']['type'], 'SEND SHORT MESSAGE')
+        self.assertEqual(t['mti'], 'SMS-SUBMIT')
+        self.assertEqual(t['da'], '999')
+        self.assertEqual(t['pid_name'], 'SME-to-SME (implicit)')
+        self.assertEqual(t['encoding'], '8-bit data')
+        self.assertEqual(t['text'], 'Hi')
 
     def test_setup_menu_long_form_length(self):
         # Real Mi A1 startup trace: D0 length encoded as 0x81 0xBC (188 bytes).
@@ -506,6 +676,148 @@ class TestDcsText(unittest.TestCase):
     def test_latin1(self):
         from simtrace2_pysniff.server.decode import _decode_dcs_text
         self.assertEqual(_decode_dcs_text(b'\x04caf\xe9'), 'café')
+
+
+class TestAtrPps(unittest.TestCase):
+    def test_atr_simple_t0_only(self):
+        from simtrace2_pysniff.server.decode import _decode_atr
+        # 3B 00: direct, T0=00, no interface bytes, 0 historical bytes, only T=0 → no TCK
+        r = _decode_atr(bytes.fromhex('3B00'))
+        self.assertEqual(r['convention'], 'direct')
+        self.assertEqual(r['t0'], '00')
+        self.assertEqual(r['historical_len'], 0)
+        self.assertNotIn('tck', r)
+
+    def test_atr_ta1(self):
+        from simtrace2_pysniff.server.decode import _decode_atr
+        # 3B 12 11 00 00: TA1=11 (Fi=1,Di=1), 2 historical bytes, T=0 → no TCK
+        r = _decode_atr(bytes.fromhex('3B12110000'))
+        self.assertEqual(r['convention'], 'direct')
+        self.assertEqual(r['interface'][0]['name'], 'TA1')
+        self.assertEqual(r['interface'][0]['f'], 372)
+        self.assertEqual(r['interface'][0]['d'], 1)
+        self.assertEqual(r['historical_len'], 2)
+        self.assertNotIn('tck', r)
+
+    def test_atr_td1_t1_has_tck(self):
+        from simtrace2_pysniff.server.decode import _decode_atr
+        # 3B 80 01 80 31 80 66 ... : construct T=1 with TCK
+        # T0=80 → TD1 present, 0 historical; TD1=01 (T=1, no more interface); then TCK
+        # bytes: 3B 80 01 xx where xx = XOR(80,01) = 81
+        r = _decode_atr(bytes.fromhex('3B800181'))
+        self.assertEqual(r['protocols'], ['T=1'])
+        self.assertIn('tck', r)
+        self.assertTrue(r['tck_valid'])
+        self.assertEqual(r['tck'], '81')
+
+    def test_atr_inverse_convention(self):
+        from simtrace2_pysniff.server.decode import _decode_atr
+        # Inverse: TS=3F, then inverted bytes. Take direct ATR "3B 00" and invert body.
+        # Inverted 0x00 is 0x00, so ATR = 3F 00 → convention inverse, T0=00.
+        r = _decode_atr(bytes.fromhex('3F00'))
+        self.assertEqual(r['convention'], 'inverse')
+        self.assertEqual(r['t0'], '00')
+
+    def test_atr_historical_life_cycle(self):
+        from simtrace2_pysniff.server.decode import _decode_atr
+        # T0 = 0x03 (3 historical bytes); historical = 80 00 05 (life cycle: operational)
+        r = _decode_atr(bytes.fromhex('3B03800005'))
+        self.assertEqual(r['historical_len'], 3)
+        self.assertEqual(r['historical']['category'], 'status information (life cycle)')
+        self.assertEqual(r['historical']['life_cycle'], 'operational state (activated)')
+
+    def test_pps(self):
+        from simtrace2_pysniff.server.decode import _decode_pps
+        # FF 10 11 xx: PPS0=10 (T=0, PPS1 present), PPS1=11 (Fi=1,Di=1), PCK=XOR(FF,10,11)=FE
+        r = _decode_pps(bytes.fromhex('FF1011FE'))
+        self.assertEqual(r['protocol'], 'T=0')
+        self.assertEqual(r['fi_di']['f'], 372)
+        self.assertEqual(r['fi_di']['d'], 1)
+        self.assertTrue(r['pck_valid'])
+        self.assertEqual(r['pck'], 'FE')
+
+
+class TestSummary(unittest.TestCase):
+    def test_select_path_from_mf(self):
+        r = decode_message(bytes.fromhex('a0a40804022fe29000'))
+        self.assertEqual(r['summary'], 'Path from MF: 2FE2 (EF_ICCID), Return FCI template')
+
+    def test_select_by_file_id(self):
+        r = decode_message(bytes.fromhex('a0a40000023f009000'))
+        self.assertEqual(r['summary'], 'DF/EF/MF by file ID: 3F00 (MF)')
+
+    def test_read_record(self):
+        r = decode_message(bytes.fromhex('a0b2010400'))
+        self.assertEqual(r['summary'], 'Record number: 1, use record number from P1')
+
+    def test_verify_pin_no_leak(self):
+        r = decode_message(bytes.fromhex('0020000000'))
+        self.assertEqual(r['summary'], 'Verify PIN1')
+
+    def test_fetch_setup_menu(self):
+        r = decode_message(bytes.fromhex(
+            '8012000030D02E810301250082028182050B416C6661204D6F62696C'
+            '658F16808112089DB0C1C2C0BEB9BAB82F53657474696E67739000'))
+        self.assertEqual(r['summary'], 'Alfa Mobile, 1 item')
+
+    def test_envelope_sms_pp(self):
+        r = decode_message(bytes.fromhex(
+            '80C2000022D120020283810607919740430900F40B1104038154F50004'
+            '260812143000210248699000'))
+        self.assertEqual(r['summary'], 'SMSC +79043490004, SMS-DELIVER from 455 «Hi»')
+
+    def test_terminal_response(self):
+        r = decode_message(bytes.fromhex(
+            '80140000108103010300020282810301000402011E9000'))
+        self.assertEqual(r['summary'], '→ POLL INTERVAL, Command performed successfully')
+
+    def test_get_response_for(self):
+        r = decode_message(bytes.fromhex('a0c000000f'),
+                           prev={'ins_name': 'SELECT', 'sw1': '61'})
+        self.assertEqual(r['summary'], 'response for SELECT')
+
+
+class TestSelectPath(unittest.TestCase):
+    def test_path_adf_alias(self):
+        # 7FFF = current ADF; 6F05 after it → EF_LI (USIM).
+        r = decode_message(bytes.fromhex('a0a40804047fff6f059000'))
+        self.assertEqual(r['body']['note'], 'current ADF/EF_LI')
+        self.assertEqual(r['summary'],
+                         'Path from MF: 7FFF6F05 (current ADF/EF_LI), Return FCI template')
+
+    def test_path_full(self):
+        r = decode_message(bytes.fromhex('a0a40804067f107f206f079000'))
+        self.assertEqual(r['body']['note'], 'DF_TELECOM/DF_GSM/EF_IMSI')
+
+    def test_path_current_df(self):
+        # P1 = 0x09 → 'Path from current DF' (no 7FFF/3F00 prefix).
+        r = decode_message(bytes.fromhex('a0a40904046f076f049000'))
+        self.assertEqual(r['p1']['name'], 'Path from current DF')
+        self.assertEqual(r['body']['note'], 'EF_IMSI/EF_IMPU')
+
+    def test_path_isim_adf_alias(self):
+        # 7FFF 6F04 → EF_IMPU (ISIM).
+        r = decode_message(bytes.fromhex('a0a40804047fff6f049000'))
+        self.assertEqual(r['body']['note'], 'current ADF/EF_IMPU')
+
+    def test_path_df_child(self):
+        # 7FFF 5F3B 4F20 → current ADF / DF_GSM_ACCESS / EF_Kc.
+        r = decode_message(bytes.fromhex('a0a40804067fff5f3b4f209000'))
+        self.assertEqual(r['body']['note'], 'current ADF/DF_GSM_ACCESS/EF_Kc')
+
+    def test_path_df_child_disambiguates_fid(self):
+        # 7F10 5F3B 4F47 → DF_TELECOM / DF_MULTIMEDIA / EF_MML (5F3B is
+        # DF_MULTIMEDIA here, not DF_GSM_ACCESS).
+        r = decode_message(bytes.fromhex('a0a40804067f105f3b4f479000'))
+        self.assertEqual(r['body']['note'], 'DF_TELECOM/DF_MULTIMEDIA/EF_MML')
+
+    def test_path_phonebook(self):
+        r = decode_message(bytes.fromhex('a0a40804067f105f3a4f229000'))
+        self.assertEqual(r['body']['note'], 'DF_TELECOM/DF_PHONEBOOK/EF_PSC')
+
+    def test_path_5gs(self):
+        r = decode_message(bytes.fromhex('a0a40804067fff5fc04f019000'))
+        self.assertEqual(r['body']['note'], 'current ADF/DF_5GS/EF_5GS3GPPLOCI')
 
 
 if __name__ == '__main__':

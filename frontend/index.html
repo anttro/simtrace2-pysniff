@@ -110,6 +110,7 @@ body { font: 14px/1.5 system-ui, sans-serif; background: var(--bg); color: var(-
 .apdu-type.atr { color: var(--green); }
 .apdu-type.pps { color: var(--yellow); }
 .apdu-data { font-family: monospace; color: var(--text-dim); word-break: break-all; flex: 1; }
+.apdu-sw { font-family: monospace; color: var(--text-muted); white-space: nowrap; min-width: 52px; }
 
 /* APDU detail panel */
 .apdu-detail { display: flex; flex-direction: column; max-height: 40%; overflow-y: auto; border-top: 2px solid var(--accent); background: var(--bg-panel); flex-shrink: 0; }
@@ -441,6 +442,17 @@ function data_text(m) {
     return fmt_data(m.data);
 }
 
+function cmd_description(m) {
+    if (m.decoded && m.decoded.summary) return m.decoded.summary;
+    return data_text(m);
+}
+
+function sw_text(m) {
+    const d = m.decoded;
+    if (!d || !d.sw) return '';
+    return d.sw.sw1 + ' ' + d.sw.sw2;
+}
+
 // ──────────────────── API ────────────────────
 const API = {
     async _fetch(method, path, body) {
@@ -515,8 +527,8 @@ function responseRows(resp) {
     if (resp.code !== undefined) {
         rows.push(['Result', resp.code + (resp.name ? ' — ' + resp.name : '')]);
     }
-    if (resp.duration !== undefined) {
-        rows.push(['Duration', resp.duration + ' s']);
+    if (resp.duration) {
+        rows.push(['Duration', resp.duration.value + ' ' + resp.duration.unit]);
     }
     if (resp.item_identifier !== undefined) {
         rows.push(['Item', resp.item_identifier]);
@@ -570,7 +582,7 @@ function cmdRows(cmd) {
             rows.push(['Item ' + (it.id !== undefined ? '0x' + hx(it.id, 2) : '?'), it.text]);
         }
     }
-    if (cmd.duration !== undefined) rows.push(['Duration', cmd.duration + ' s']);
+    if (cmd.duration) rows.push(['Duration', cmd.duration.value + ' ' + cmd.duration.unit]);
     if (cmd.address) rows.push(['Address', cmd.address]);
     if (cmd.response_length) rows.push(['Response length', cmd.response_length.min + '…' + cmd.response_length.max]);
 
@@ -578,19 +590,105 @@ function cmdRows(cmd) {
     const t = cmd.tpdu;
     if (t) {
         rows.push(['SMS TPDU', t.mti]);
-        if (t.oa) rows.push(['Originating addr', t.oa]);
-        if (t.da) rows.push(['Destination addr', t.da]);
-        if (t.mr !== undefined) rows.push(['Message ref', '0x' + hx(t.mr, 2)]);
-        if (t.pid !== undefined) rows.push(['PID', '0x' + hx(t.pid, 2) + (t.pid_name ? ' — ' + t.pid_name : '')]);
-        if (t.dcs !== undefined) rows.push(['DCS', '0x' + hx(t.dcs, 2) + ' — ' + t.encoding + (t.msg_class ? ' (class ' + t.msg_class + ')' : '')]);
-        if (t.text !== undefined) rows.push(['Text', t.text]);
-        if (t.payload) rows.push(['Payload', t.payload]);
-        if (t.udh) rows.push(['UDH', t.udh]);
+        if (t.oa) rows.push(['TP-OA', t.oa]);
+        if (t.da) rows.push(['TP-DA', t.da]);
+        if (t.mr !== undefined) rows.push(['TP-MR', '0x' + hx(t.mr, 2)]);
+        if (t.scts) rows.push(['TP-SCTS', t.scts]);
+        if (t.pid !== undefined) rows.push(['TP-PID', '0x' + hx(t.pid, 2) + (t.pid_name ? ' — ' + t.pid_name : '')]);
+        if (t.dcs !== undefined) {
+            const di = t.dcs_info || {};
+            let dcsTxt = '0x' + hx(t.dcs, 2) + ' — ' + t.encoding;
+            if (di.group) dcsTxt += ' · ' + di.group;
+            if (di.compressed) dcsTxt += ' · compressed';
+            if (di.indication) dcsTxt += ' · ' + di.indication + ' (' + di.sense + ')';
+            else if (t.msg_class !== undefined && di.has_class) dcsTxt += ' · class ' + t.msg_class;
+            rows.push(['TP-DCS', dcsTxt]);
+        }
+        if (t.vp) rows.push(['TP-VP', t.vp]);
+        if (Array.isArray(t.udh)) {
+            for (const ie of t.udh) {
+                let v = ie.name || ('IEI ' + ie.iei);
+                const d = ie.data;
+                if (d) {
+                    if (d.seq !== undefined && d.max !== undefined)
+                        v += ` — ref ${d.reference}, part ${d.seq}/${d.max}`;
+                    else if (d.dest_port !== undefined)
+                        v += ` — dst ${d.dest_port}, src ${d.orig_port}`;
+                    else if (d.count !== undefined)
+                        v += ` — ${d.indication || 'messages'}: ${d.count}` + (d.store ? ' (store)' : '');
+                }
+                if (ie.hex) v += ' · ' + ie.hex;
+                rows.push(['UDH', v]);
+            }
+        }
+        if (t.text !== undefined) rows.push(['TP-UD', t.text]);
+        if (t.payload) rows.push(['TP-UD (payload)', t.payload]);
     }
 
     if (!rows.length) return '';
     return `<tr><td class="label" colspan="2" style="padding-top:6px; border-top:1px solid var(--border);">Command</td></tr>` +
         rows.map(([l, v]) => `<tr><td class="label">${l}</td><td class="value">${v}</td></tr>`).join('');
+}
+
+function ifaceValue(ifc) {
+    const v = [];
+    if (ifc.f !== undefined) v.push('F=' + ifc.f);
+    if (ifc.d !== undefined) v.push('D=' + ifc.d);
+    if (ifc.f_div_d !== undefined) v.push('F/D=' + ifc.f_div_d);
+    if (ifc.f_max !== undefined) v.push('f(max)=' + ifc.f_max + ' MHz');
+    if (ifc.programming !== undefined) v.push(ifc.programming);
+    if (ifc.extra_guard_time !== undefined) v.push('N=' + ifc.extra_guard_time + ' etu');
+    if (ifc.work_waiting_time !== undefined) v.push('WI=' + ifc.work_waiting_time);
+    if (ifc.specific !== undefined) v.push(ifc.specific ? 'specific mode' : 'negotiable mode');
+    if (ifc.protocol !== undefined) v.push(ifc.protocol);
+    if (ifc.ifsc !== undefined) v.push('IFSC=' + ifc.ifsc);
+    if (ifc.bwi !== undefined) v.push('BWI=' + ifc.bwi + ', CWI=' + ifc.cwi);
+    if (ifc.clock_stop) v.push(ifc.clock_stop);
+    if (ifc.classes && ifc.classes.length) v.push('classes ' + ifc.classes.join(', '));
+    if (ifc.spu !== undefined) v.push('SPU ' + ifc.spu);
+    return (v.length ? v.join(' · ') : '') + (ifc.hex ? ' (0x' + ifc.hex + ')' : '');
+}
+
+function atrPpsRows(decoded) {
+    const rows = [];
+    if (decoded.type === 'atr') {
+        rows.push(['Convention', decoded.convention || 'unknown']);
+        if (decoded.ts) rows.push(['TS', '0x' + decoded.ts]);
+        if (decoded.t0) rows.push(['T0', '0x' + decoded.t0 + ' — ' + decoded.historical_len + ' historical bytes']);
+        if (decoded.protocols) rows.push(['Protocols', decoded.protocols.join(', ')]);
+        if (decoded.interface) {
+            for (const ifc of decoded.interface) {
+                rows.push([ifc.name, ifaceValue(ifc)]);
+            }
+        }
+        if (decoded.historical) {
+            const h = decoded.historical;
+            let v = h.category || '';
+            if (h.life_cycle) v += ' — ' + h.life_cycle;
+            if (h.sw) v += ' (SW ' + h.sw + ')';
+            rows.push(['Historical', v + ' · ' + h.raw]);
+        }
+        if (decoded.tck) {
+            rows.push(['TCK', '0x' + decoded.tck + (decoded.tck_valid ? ' (valid)' : ' (mismatch)')]);
+        }
+    } else {
+        if (decoded.ppss) rows.push(['PPSS', '0x' + decoded.ppss]);
+        if (decoded.pps0) rows.push(['PPS0', '0x' + decoded.pps0]);
+        if (decoded.protocol) rows.push(['Protocol', decoded.protocol]);
+        if (decoded.fi_di) {
+            const fd = decoded.fi_di;
+            const v = [];
+            if (fd.f !== undefined) v.push('F=' + fd.f);
+            if (fd.d !== undefined) v.push('D=' + fd.d);
+            if (fd.f_div_d !== undefined) v.push('F/D=' + fd.f_div_d);
+            rows.push(['PPS1', v.join(' · ') + ' (0x' + fd.pps1 + ')']);
+        }
+        if (decoded.pps2 !== undefined) rows.push(['PPS2', '0x' + decoded.pps2 + (decoded.spu ? ' — ' + decoded.spu : '')]);
+        if (decoded.pck) rows.push(['PCK', '0x' + decoded.pck + (decoded.pck_valid ? ' (valid)' : ' (mismatch)')]);
+        if (decoded.note) rows.push(['Note', decoded.note]);
+    }
+    rows.push(['Raw', (decoded.raw || '')]);
+    return rows;
 }
 
 function showDetail(msg, entry) {
@@ -630,10 +728,11 @@ function showDetail(msg, entry) {
     }
 
     if (decoded.type === 'atr' || decoded.type === 'pps') {
+        const rows = atrPpsRows(decoded);
         d.innerHTML = `<div class="detail-header"><strong>${decoded.type.toUpperCase()}</strong><span style="color:var(--text-muted)">${fmt_elapsed(msg.elapsed)}</span></div>
             <div class="detail-body">
                 <table>
-                    <tr><td class="label">Data</td><td class="hex">${(decoded.hex || '').toUpperCase()}</td></tr>
+                    ${rows.map(([l, v]) => `<tr><td class="label">${l}</td><td class="hex">${v}</td></tr>`).join('')}
                 </table>
             </div>`;
         return;
@@ -687,6 +786,7 @@ function showDetail(msg, entry) {
     </div>
     <div class="detail-body">
         <table>
+            <tr><td class="label">Raw APDU</td><td class="hex">${fmt_data(msg.data, 9999)}</td></tr>
             <tr><td class="label">CLA</td><td class="value">0x${(cla.hex || '').toUpperCase()} — ${claInfo}</td></tr>
             <tr><td class="label">INS</td><td class="name">0x${(decoded.ins_hex || '').toUpperCase()} — ${decoded.ins_name}</td></tr>
             ${catRow}${respRow}${trRow}
@@ -821,7 +921,8 @@ function renderMessages() {
         return `<div class="apdu-entry" data-idx="${idx}">
             <span class="apdu-time">${fmt_elapsed(m.elapsed)}</span>
             <span class="apdu-type ${typeCls}">${label}</span>
-            <span class="apdu-data">${data_text(m)}</span>
+            <span class="apdu-sw">${sw_text(m)}</span>
+            <span class="apdu-data">${cmd_description(m)}</span>
         </div>`;
     }).join('');
 
@@ -1278,7 +1379,7 @@ function onFilterChange() {
 }
 
 // ──────────────────── Versioning ────────────────────
-const PWA_VERSION = '1.2.0';
+const PWA_VERSION = '1.3.0';
 const MIN_SERVER_VERSION = '1.0.0';
 
 function parseVersion(v) {
