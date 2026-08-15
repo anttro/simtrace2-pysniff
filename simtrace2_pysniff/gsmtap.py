@@ -81,7 +81,7 @@ class GsmtapReceiver:
         """
         try:
             packet, addr = self._sock.recvfrom(65536)
-        except socket.timeout:
+        except (socket.timeout, OSError):
             return None, None
 
         if len(packet) < _GSMTAP_HDR_SIZE:

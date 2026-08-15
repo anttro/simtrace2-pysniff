@@ -13,6 +13,7 @@ from http.server import HTTPServer
 from .server import RequestHandler
 from .database import Database, DEFAULT_DB_PATH
 from .capture import CaptureManager, GsmtapListener, DirectSniffer
+from .. import __version__
 
 
 def _default_web_dir():
@@ -56,7 +57,7 @@ def main():
     server = HTTPServer((args.host, args.port), RequestHandler)
     server.web_dir = args.web_dir
 
-    print(f'simtrace2-pysniff-server — http://{args.host}:{args.port}', file=sys.stderr)
+    print(f'simtrace2-pysniff-server v{__version__} — http://{args.host}:{args.port}', file=sys.stderr)
     print(f'  capture mode: {args.capture}', file=sys.stderr)
     if args.capture == 'gsmtap':
         print(f'  GSMTAP port:  {args.gsmtap_port}', file=sys.stderr)

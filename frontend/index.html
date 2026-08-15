@@ -24,6 +24,7 @@
     --warn-bg: #7f1d1d;
     --warn: #facc15;
     --warn-hover: #eab308;
+    --warning-bg: #78350f;
     --error: #f87171;
     --code-bg: #1e293b;
     --scrollbar-track: #0f172a;
@@ -49,6 +50,7 @@
     --warn-bg: #fee2e2;
     --warn: #f59e0b;
     --warn-hover: #d97706;
+    --warning-bg: #fef3c7;
     --error: #dc2626;
     --code-bg: #f3f4f6;
     --scrollbar-track: #fafafa;
@@ -168,12 +170,15 @@ body { font: 14px/1.5 system-ui, sans-serif; background: var(--bg); color: var(-
 .settings-url-row button { padding: 8px 16px; background: var(--accent); color: #fff; border: none; border-radius: 4px; cursor: pointer; font-weight: 600; white-space: nowrap; }
 .settings-url-row button:hover { background: var(--accent-hover); }
 .settings-url-row button.disconnected { background: var(--bg-input); }
-.settings-view .conn-status { padding: 12px; border-radius: 4px; margin-bottom: 12px; }
-.settings-view .conn-status.connected { background: var(--accent-bg); color: var(--green); }
-.settings-view .conn-status.disconnected { background: var(--warn-bg); color: var(--error); }
+.conn-status { padding: 12px; border-radius: 4px; margin-bottom: 12px; }
+.conn-status.connected { background: var(--accent-bg); color: var(--green); }
+.conn-status.disconnected { background: var(--warn-bg); color: var(--error); }
 .conn-hint { font-size: 12px; color: var(--text-muted); margin: 8px 0 0; line-height: 1.5; }
-.capture-mode { font-size: 12px; color: var(--text-muted); margin: 8px 0 0; line-height: 1.5; }
+.capture-mode { padding: 12px; border-radius: 4px; margin-bottom: 12px; font-size: 13px; line-height: 1.5; }
 .capture-mode:empty { display: none; }
+.capture-mode.gsmtap { background: var(--warning-bg); color: var(--warn); }
+.capture-mode.direct { background: var(--accent-bg); color: var(--green); }
+.capture-mode.disabled { background: var(--warning-bg); color: var(--warn); }
 .version-warn { font-size: 12px; color: var(--warn); margin: 8px 0 0; line-height: 1.5; }
 .version-warn:empty { display: none; }
 .conn-instructions { margin-top: 16px; font-size: 13px; color: var(--text-faint); line-height: 1.7; }
@@ -186,6 +191,7 @@ body { font: 14px/1.5 system-ui, sans-serif; background: var(--bg); color: var(-
 /* Empty state */
 .empty-state { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: var(--text-muted); gap: 16px; }
 .empty-state button { padding: 12px 24px; background: var(--accent); color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 16px; }
+.empty-state .conn-status, .empty-state .capture-mode { width: 100%; max-width: 560px; text-align: left; }
 
 /* Modal */
 .modal-overlay { display: none; position: fixed; inset: 0; background: var(--modal-bg); z-index: 100; align-items: center; justify-content: center; }
@@ -321,6 +327,8 @@ const STATE = {
     typeCounts: [],
     pendingDeleteId: null,
     serverAvailable: false,
+    serverName: '',
+    serverVersion: '',
     captureMode: '',
 };
 
@@ -762,6 +770,27 @@ function matchesFilter(m, i, filterType) {
     return false;
 }
 
+function renderTraceEmptyState() {
+    if (STATE.captureActive || STATE.sessionViewId) return;
+    const list = el('apdu-list');
+    const connCls = STATE.serverAvailable ? 'connected' : 'disconnected';
+    const modeText = captureModeText();
+    const modeHtml = modeText
+        ? `<div class="capture-mode ${STATE.captureMode}">${modeText}</div>`
+        : '';
+    const action = STATE.captureMode === 'disabled'
+        ? `<p style="font-size:12px;">${t('Open a saved session from the Sessions tab.')}</p>`
+        : `<button id="trace-start-btn">${t('Start Capture')}</button>`;
+    list.innerHTML = `<div class="empty-state">
+        <div class="conn-status ${connCls}">${connectionStatusText()}</div>
+        ${modeHtml}
+        ${action}
+    </div>`;
+    const btn = $('#trace-start-btn', list);
+    if (btn) btn.addEventListener('click', startCapture);
+    updateStatus();
+}
+
 function renderMessages() {
     const list = el('apdu-list');
     const searchQ = el('search-input').value.toLowerCase();
@@ -780,15 +809,7 @@ function renderMessages() {
     populateFilterOptions();
 
     if (!STATE.captureActive && !STATE.sessionViewId) {
-        if (STATE.captureMode === 'disabled') {
-            list.innerHTML = `<div class="empty-state"><p>${t('Capture unavailable')}</p>
-                <p style="font-size:12px;">${t('Open a saved session from the Sessions tab.')}</p></div>`;
-        } else {
-            list.innerHTML = `<div class="empty-state"><p>${t('No capture active')}</p>
-                <button id="trace-start-btn">${t('Start Capture')}</button></div>`;
-            $('#trace-start-btn', list).addEventListener('click', startCapture);
-        }
-        updateStatus();
+        renderTraceEmptyState();
         return;
     }
 
@@ -882,6 +903,7 @@ async function stopCapture() {
     try {
         await API.stopCapture();
         STATE.captureActive = false;
+        STATE.currentSessionId = null;
         STATE.sessionViewId = null;
         updateCaptureButton();
         updateStatus();
@@ -1106,21 +1128,31 @@ function updateVersionWarn(serverVersion) {
     elv.textContent = '';
 }
 
-function updateCaptureModeLine() {
-    const elm = el('capture-mode');
+function captureModeText() {
     switch (STATE.captureMode) {
         case 'gsmtap':
-            elm.textContent = t('Capture mode: GSMTAP — the server is listening for incoming UDP/GSMTAP traffic. Ensure a GSMTAP source (e.g. simtrace2-pysniff or simtrace2-sniff) is feeding the server.');
-            break;
+            return t('Capture mode: GSMTAP — the server is listening for incoming UDP/GSMTAP traffic. Ensure a GSMTAP source (e.g. simtrace2-pysniff or simtrace2-sniff) is feeding the server.');
         case 'direct':
-            elm.textContent = t('Capture mode: direct — the server captures from SIMtrace2 hardware. Keep the device connected.');
-            break;
+            return t('Capture mode: direct — the server captures from SIMtrace2 hardware. Keep the device connected.');
         case 'disabled':
-            elm.textContent = t('Capture is disabled — only pre-captured traces (saved sessions / PCAP import) are available.');
-            break;
+            return t('Capture is disabled — only pre-captured traces (saved sessions / PCAP import) are available.');
         default:
-            elm.textContent = '';
+            return '';
     }
+}
+
+function connectionStatusText() {
+    if (STATE.serverAvailable) {
+        return '⬤ ' + t('Connected') + ' — ' + STATE.serverName + ' v' + STATE.serverVersion;
+    }
+    return '⬤ ' + t('Not connected — ensure the server is running on the URL above');
+}
+
+function updateCaptureModeLine() {
+    const elm = el('capture-mode');
+    const mode = STATE.captureMode;
+    elm.textContent = captureModeText();
+    elm.className = 'capture-mode' + (mode ? ' ' + mode : '');
 }
 
 function connectServer() {
@@ -1135,9 +1167,13 @@ function disconnectServer() {
         _connTimer = null;
     }
     STATE.serverAvailable = false;
+    STATE.serverName = '';
+    STATE.serverVersion = '';
+    STATE.captureMode = '';
     el('conn-status').textContent = '⬤ ' + t('Disconnected — click Connect to resume');
     el('conn-status').className = 'conn-status disconnected';
     el('capture-mode').textContent = '';
+    el('capture-mode').className = 'capture-mode';
     el('version-warn').textContent = '';
     el('conn-hint').textContent = '';
     el('conn-instructions').innerHTML = '';
@@ -1152,6 +1188,7 @@ function disconnectServer() {
         STATE.captureActive = false;
         STATE.currentSessionId = null;
     }
+    renderTraceEmptyState();
 }
 
 async function checkConnection() {
@@ -1159,7 +1196,9 @@ async function checkConnection() {
         const data = await API.status();
         STATE.serverAvailable = true;
         STATE.captureMode = data.capture_mode || '';
-        el('conn-status').textContent = '⬤ ' + t('Connected') + ' — ' + data.server + ' v' + (data.version || '?');
+        STATE.serverName = data.server || 'simtrace-analyser-server';
+        STATE.serverVersion = data.version || '';
+        el('conn-status').textContent = connectionStatusText();
         el('conn-status').className = 'conn-status connected';
         updateVersionWarn(data.version);
         updateCaptureModeLine();
@@ -1174,12 +1213,15 @@ async function checkConnection() {
             STATE.currentSessionId = data.session_id;
         }
         updateCaptureButton();
+        renderTraceEmptyState();
     } catch (e) {
         STATE.serverAvailable = false;
         STATE.captureMode = '';
-        el('conn-status').textContent = '⬤ ' + t('Not connected — ensure the server is running on the URL above');
+        STATE.serverName = '';
+        STATE.serverVersion = '';
+        el('conn-status').textContent = connectionStatusText();
         el('conn-status').className = 'conn-status disconnected';
-        el('capture-mode').textContent = '';
+        updateCaptureModeLine();
         el('version-warn').textContent = '';
         const url = STATE.serverUrl || location.origin;
         el('conn-hint').textContent = t(isLikelyBlocked() ? HINT_BLOCKED : HINT_UNREACHABLE).replace('{url}', url);
@@ -1209,6 +1251,7 @@ async function checkConnection() {
         el('status-dot').className = 'status-dot off';
         el('status-text').textContent = t('Not connected');
         updateCaptureButton();
+        renderTraceEmptyState();
     }
 }
 
@@ -1433,6 +1476,7 @@ function init() {
 
     el('pwa-version').textContent = 'v' + PWA_VERSION;
     syncServerSourceUi();
+    renderTraceEmptyState();
 
     document.querySelectorAll('.header-tab').forEach(tab => {
         tab.addEventListener('click', () => switchTab(tab.dataset.tab));

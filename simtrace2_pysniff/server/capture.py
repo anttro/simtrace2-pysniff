@@ -94,12 +94,17 @@ class CaptureManager:
 
     def stop_session(self):
         if self._session_id is None:
-            return
+            return None
         self._backend.stop()
-        self._db.close_session(self._session_id)
+        if self._thread is not None:
+            self._thread.join(timeout=2.0)
         sid = self._session_id
         self._session_id = None
         self._start_time = 0.0
+        if self._db.count_messages(sid) == 0:
+            self._db.delete_session(sid)
+            return None
+        self._db.close_session(sid)
         return sid
 
     def _capture_loop(self):

@@ -293,6 +293,9 @@ class RequestHandler(BaseHTTPRequestHandler):
             self._send_error(400, 'No active capture')
             return
         session_id = self.capture.stop_session()
+        if session_id is None:
+            self._send_json({'session_id': None, 'messages_count': 0, 'discarded': True})
+            return
         session = self.db.get_session(session_id)
         self._send_json({
             'session_id': session_id,
