@@ -869,6 +869,17 @@ class TestFileDecoders(unittest.TestCase):
         self.assertEqual(f['name'], 'B HA 1 Sic')
         self.assertEqual(f['number'], '6082658001')
 
+    def test_adn_ber_tlv_fallback(self):
+        # Non-ADN data (BER-TLV) must not be decoded as a name/number.
+        from simtrace2_pysniff.server.decode import _decode_file_data
+        raw = bytes.fromhex(
+            'A0348001078120E823FF53C3E271754A644ED63DEFCF24A916387E3C585F'
+            '0820CF3E27841852F7820400000000830400000000840102'
+            'FFFFFFFFFFFFFFFFFFFFFFFFFFFF')
+        f = _decode_file_data('6fc7', raw)
+        self.assertNotIn('name', f)
+        self.assertIn('raw', f)
+
     def test_ust(self):
         from simtrace2_pysniff.server.decode import _decode_file_data
         f = _decode_file_data('6f38', bytes.fromhex('07'))
@@ -982,6 +993,38 @@ class TestSelectionTracking(unittest.TestCase):
                               bytes.fromhex('00b0000009') + bytes.fromhex('0f52001132547698f0') + bytes.fromhex('9000'))
             msgs = db.get_messages(sid)
             self.assertNotIn('file', msgs[2]['decoded'])
+
+    def test_failed_select_keeps_selection(self):
+        # A SELECT that fails (6A82) must not change the current file.
+        import tempfile
+        from simtrace2_pysniff.server.database import Database
+        with tempfile.NamedTemporaryFile(suffix='.db') as tmp:
+            db = Database(tmp.name)
+            sid = db.create_session('capture')
+            db.insert_message(sid, 0.0, 'tpdu', bytes.fromhex('a0a40804047fff6f079000'))
+            db.insert_message(sid, 0.1, 'tpdu', bytes.fromhex('a0a40804047fff6f136a82'))
+            db.insert_message(sid, 0.2, 'tpdu',
+                              bytes.fromhex('00b0000009') + bytes.fromhex('0f52001132547698f0') + bytes.fromhex('9000'))
+            msgs = db.get_messages(sid)
+            read = msgs[2]
+            self.assertEqual(read['decoded']['file']['imsi'], '250011234567890')
+
+    def test_record_op_on_transparent_is_stale(self):
+        # SELECT a transparent EF, then READ RECORD → selection is stale, so
+        # we must not decode garbage.
+        import tempfile
+        from simtrace2_pysniff.server.database import Database
+        with tempfile.NamedTemporaryFile(suffix='.db') as tmp:
+            db = Database(tmp.name)
+            sid = db.create_session('capture')
+            db.insert_message(sid, 0.0, 'tpdu', bytes.fromhex('a0a40804047fff6f056123'))
+            db.insert_message(sid, 0.1, 'tpdu',
+                              bytes.fromhex('00c000000a') + bytes.fromhex('62088202012183026f05') + bytes.fromhex('9000'))
+            db.insert_message(sid, 0.2, 'tpdu',
+                              bytes.fromhex('00b2010408') + bytes.fromhex('800101a010a4068301019501') + bytes.fromhex('9000'))
+            msgs = db.get_messages(sid)
+            read = msgs[2]
+            self.assertTrue(read['decoded']['file']['stale'])
 
 
 if __name__ == '__main__':

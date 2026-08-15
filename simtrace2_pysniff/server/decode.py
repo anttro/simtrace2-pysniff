@@ -115,7 +115,7 @@ def decode_cla(cla):
         'hex': f'{cla:02x}',
         'interclass': interclass,
         'channel': cla & 0x03,
-        'secure_messaging': 'none' if (cla & 0x0c) == 0 else 'SM present',
+        'secure_messaging': 'none' if (cla & 0x0c) == 0 else 'present',
         'chain': chain_names.get(chain_bits, f'unknown ({chain_bits})'),
     }
     return result
@@ -1961,6 +1961,31 @@ def _decode_li(raw, p1=None):
     return {'languages': codes}
 
 
+def _looks_like_ber_tlv(data):
+    """Heuristic: does *data* look like a BER-TLV rather than Annex-A text?
+
+    Annex-A UCS2 prefixes are 0x80/0x81/0x82, so those are excluded; other
+    0x83-0xBF leading bytes are treated as BER-TLV tags if their length
+    field is consistent with the data length.
+    """
+    if len(data) < 2:
+        return False
+    if data[0] in (0x80, 0x81, 0x82):
+        return False
+    if not (0x80 <= data[0] <= 0xBF):
+        return False
+    length = data[1]
+    if length & 0x80:
+        num = length & 0x7F
+        if num == 0 or 2 + num > len(data):
+            return False
+        length = int.from_bytes(data[2:2 + num], 'big')
+        header = 2 + num
+    else:
+        header = 2
+    return header + length >= len(data) - 1
+
+
 def _decode_adn(raw, p1=None):
     """ADN-format record: alpha + len_bcd + TON/NPI + number + CCP + ext1."""
     if not raw or all(b == 0xff for b in raw):
@@ -1968,6 +1993,9 @@ def _decode_adn(raw, p1=None):
     if len(raw) < 14:
         return {'raw': raw.hex().upper()}
     alpha = raw[:-14].rstrip(b'\xff')
+    # If the alpha is not text (e.g. BER-TLV), show raw hex instead.
+    if alpha and _looks_like_ber_tlv(alpha):
+        return {'raw': raw.hex().upper()}
     name = _decode_annex_a(alpha) if alpha else ''
     number = _decode_bcd_address(raw[-13:-2])
     ccp = raw[-2]
@@ -2269,8 +2297,33 @@ def _decode_file_data(fid, raw, p1=None):
     return out
 
 
+_RECORD_STRUCTURES = ('linear fixed', 'cyclic')
+
+
+def _is_record_file(sel):
+    """True if *sel* is (or may be) a record-based EF.
+
+    A None structure means we don't know the file structure (e.g. the
+    FCP/GET RESPONSE was lost too), so we allow the decode as best effort.
+    """
+    if not sel:
+        return True
+    structure = sel.get('structure')
+    if structure is None:
+        return True
+    return structure in _RECORD_STRUCTURES
+
+
+def _stale_file_note(sel):
+    """Mark a decode as skipped because the selection is inconsistent."""
+    fid = sel.get('fid') or ''
+    return {'fid': fid, 'ef': KNOWN_FIDS.get(fid, fid.upper()), 'stale': True}
+
+
 def _file_summary(f):
     """Compact one-line summary of a decoded file body."""
+    if f.get('stale'):
+        return 'record op on non-record file (selection stale?)'
     if f.get('empty'):
         return 'empty'
     if f.get('imsi'):
@@ -2535,9 +2588,12 @@ def decode_message(raw_data, prev=None):
         if ins in (0xB0, 0xB2, 0xD6, 0xDC) and prev and prev.get('sel'):
             offset = (result.get('p1p2') or {}).get('value', 0)
             if ins in (0xB2, 0xDC) or offset == 0:
-                file_dec = _decode_file_data(prev['sel']['fid'], body, p1=p1)
-                if file_dec:
-                    result['file'] = file_dec
+                if ins in (0xB2, 0xDC) and not _is_record_file(prev['sel']):
+                    result['file'] = _stale_file_note(prev['sel'])
+                else:
+                    file_dec = _decode_file_data(prev['sel']['fid'], body, p1=p1)
+                    if file_dec:
+                        result['file'] = file_dec
 
     # SW
     if sw_bytes:
@@ -2551,17 +2607,23 @@ def decode_message(raw_data, prev=None):
             prev_ins = prev.get('ins')
             if prev_ins is not None and cmd_body_len > 0:
                 if prev_ins in (0xB0, 0xB2) and prev.get('sel') and prev.get('file_ok'):
-                    file_dec = _decode_file_data(prev['sel']['fid'], remaining[:cmd_body_len])
-                    if file_dec:
-                        result['file'] = file_dec
+                    if prev_ins == 0xB2 and not _is_record_file(prev['sel']):
+                        result['file'] = _stale_file_note(prev['sel'])
+                    else:
+                        file_dec = _decode_file_data(prev['sel']['fid'], remaining[:cmd_body_len])
+                        if file_dec:
+                            result['file'] = file_dec
                 elif prev_ins == 0xA2 and prev.get('sel') and prev.get('file_ok'):
-                    # SEARCH RECORD → list of matching record numbers
-                    fid = prev['sel']['fid']
-                    result['file'] = {
-                        'fid': fid,
-                        'ef': KNOWN_FIDS.get(fid, fid.upper()),
-                        'record_numbers': list(remaining[:cmd_body_len]),
-                    }
+                    if not _is_record_file(prev['sel']):
+                        result['file'] = _stale_file_note(prev['sel'])
+                    else:
+                        # SEARCH RECORD → list of matching record numbers
+                        fid = prev['sel']['fid']
+                        result['file'] = {
+                            'fid': fid,
+                            'ef': KNOWN_FIDS.get(fid, fid.upper()),
+                            'record_numbers': list(remaining[:cmd_body_len]),
+                        }
                 else:
                     response = _decode_response_for(prev_ins, remaining[:cmd_body_len])
                     if response:

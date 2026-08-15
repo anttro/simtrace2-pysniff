@@ -8,6 +8,11 @@ from contextlib import contextmanager
 DEFAULT_DB_DIR = os.path.expanduser('~/.simtrace-analyser')
 DEFAULT_DB_PATH = os.path.join(DEFAULT_DB_DIR, 'sessions.db')
 
+# SW1 values that mean a SELECT succeeded (normal, warnings, response pending).
+# Everything else (0x64-0x6F: execution/checking/security errors) leaves the
+# current file unchanged.
+_SUCCESS_SW1 = {'61', '62', '63', '90', '91', '92', '9e', '9f'}
+
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS sessions (
     id       INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -289,13 +294,27 @@ class Database:
         }
 
     def _selection_after(self, d, sel):
-        if d.get('ins_hex') == 'a4':
+        ins_hex = d.get('ins_hex')
+        if ins_hex == 'a4':
             from .decode import select_target_fid, KNOWN_FIDS
+            sw1 = (d.get('sw') or {}).get('sw1')
+            # Only a successful SELECT changes the current file.  On an error
+            # status word (e.g. 6A82 file-not-found) the file is unchanged.
+            if sw1 not in _SUCCESS_SW1:
+                return sel
             fid = select_target_fid(d)
             if fid:
-                return {'fid': fid, 'name': KNOWN_FIDS.get(fid)}
+                return {'fid': fid, 'name': KNOWN_FIDS.get(fid), 'structure': None}
             if (d.get('p1') or {}).get('raw') in ('03', '04'):
                 return None
+        elif ins_hex == 'c0' and d.get('response_for') == 'SELECT' and sel:
+            # GET RESPONSE carrying the FCP of the last SELECT → capture the
+            # file structure so we can sanity-check record operations.
+            fd = (d.get('response') or {}).get('file_descriptor')
+            if fd:
+                new = dict(sel)
+                new['structure'] = fd.get('structure')
+                return new
         return sel
 
     def _decode_rows(self, rows, initial_prev=None):

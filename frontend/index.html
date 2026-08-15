@@ -634,7 +634,9 @@ function fileRows(f) {
     if (!f) return '';
     const title = f.ef ? `${f.ef} (0x${(f.fid || '').toUpperCase()})` : (f.fid || '').toUpperCase();
     const rows = [];
-    if (f.empty) {
+    if (f.stale) {
+        rows.push(['File', title + ' — selection stale (record op on non-record file)']);
+    } else if (f.empty) {
         rows.push(['File', title + ' — empty']);
     } else {
         rows.push(['File', title]);
@@ -816,7 +818,7 @@ function showDetail(msg, entry) {
     }
 
     const cla = decoded.cla;
-    const claInfo = `${cla.interclass}, ch${cla.channel}, ${cla.secure_messaging}, chain: ${cla.chain}`;
+    const claInfo = `${cla.interclass}, ch${cla.channel}, SM: ${cla.secure_messaging}, chain: ${cla.chain}`;
 
     const catRow = decoded.cat_command
         ? `<tr><td class="label">CAT</td><td class="name">${decoded.cat_command}</td></tr>`
