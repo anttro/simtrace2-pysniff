@@ -938,8 +938,8 @@ function map_file_label(m) {
     const d = m.decoded;
     if (!d) return null;
     if (d.ins_hex === 'a4') {  // SELECT
-        if (d.body && d.body.note) return d.body.note;
-        if (d.summary) return d.summary;
+        if (d.body && d.body.note) return d.body.note.replace('current ADF', 'ADF');
+        if (d.summary) return d.summary.replace('current ADF', 'ADF');
         return null;
     }
     if (d.file) return d.file.ef || d.file.fid || null;
@@ -1002,7 +1002,7 @@ function buildTraceMap() {
                     let end = rec.end;
                     let m = k;
                     while (m < access.length && access[m].hasWrite && !access[m].hasRead) {
-                        if (access[m].file) files.push(access[m].file);
+                        if (access[m].file && !files.includes(access[m].file)) files.push(access[m].file);
                         end = access[m].end;
                         m++;
                     }
@@ -1013,7 +1013,7 @@ function buildTraceMap() {
                     let end = rec.end;
                     let m = k;
                     while (m < access.length && !access[m].hasWrite) {
-                        if (access[m].file) files.push(access[m].file);
+                        if (access[m].file && !files.includes(access[m].file)) files.push(access[m].file);
                         end = access[m].end;
                         m++;
                     }
