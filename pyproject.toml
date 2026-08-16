@@ -4,7 +4,7 @@ build-backend = "setuptools.backends._legacy:_Backend"
 
 [project]
 name = "simtrace2-pysniff"
-version = "1.4.0"
+version = "1.5.0"
 description = "Python-based sniffing tool for SIMtrace2 hardware (SIM card communication sniffer)"
 readme = {file = "README.md", content-type = "text/markdown"}
 license = {text = "GPL-2.0-or-later"}
