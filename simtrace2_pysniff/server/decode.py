@@ -552,7 +552,14 @@ APDU_SPEC = {
     },
     0x88: {
         'name': 'AUTHENTICATE',
-        'p1': {0x00: 'Run GSM algorithm', 0x80: 'Run 3G algo (resynchronisation)'},
+        'p1': {0x00: 'No indication'},
+        'p2': {'label': 'Auth context', 'bits': {
+            0x00: 'GSM context',
+            0x01: '3G/EPS/5G context',
+            0x02: 'VGCS/VBS context',
+            0x04: 'GBA context',
+            0x80: 'Specific reference data',
+        }},
         'body': {'label': 'Challenge/session key'},
     },
     0x89: {
@@ -1127,9 +1134,15 @@ def _decode_auth_3g(data):
     if tag == 0xDC:  # synchronisation failure → length byte + AUTS
         if len(data) >= 2:
             auts_len = data[1]
-            return {'type': '3G', 'status': 'sync fail',
-                    'auts': data[2:2 + auts_len].hex().upper()}
-        return {'type': '3G', 'status': 'sync fail', 'auts': data[1:].hex().upper()}
+            auts = data[2:2 + auts_len]
+        else:
+            auts = data[1:]
+        result = {'type': '3G', 'status': 'sync fail', 'auts': auts.hex().upper()}
+        # AUTS = SQN_MS⊕AK (6) || MAC-S (8)  (TS 33.102)
+        if len(auts) >= 14:
+            result['sqn_ak'] = auts[0:6].hex().upper()
+            result['mac_s'] = auts[6:14].hex().upper()
+        return result
     # tag 0xDB: success → length-prefixed RES, CK, IK, (KC)
     result = {'type': '3G', 'status': 'success'}
     i = 1
@@ -1170,18 +1183,12 @@ def _decode_response_for(ins, data):
 
 # ──────────────────── Command-body decoders ────────────────────
 
-AUTH_CONTEXTS = {
-    0: 'GSM',
-    1: '3G (UMTS)',
-    2: 'VGC/VBS',
-    4: 'GBA',
-}
-
-
 def _decode_auth_cmd(data, p2):
     """Decode an AUTHENTICATE command body (RAND / RAND+AUTN)."""
     ctx = p2 & 0x07
-    result = {'context': AUTH_CONTEXTS.get(ctx, f'unknown ({ctx})')}
+    result = {}
+    if p2 & 0x80:
+        result['specific_key'] = True
     if ctx in (0, 1) and data:
         i = 0
         if i < len(data):
@@ -1189,10 +1196,16 @@ def _decode_auth_cmd(data, p2):
             i += 1
             result['rand'] = data[i:i + rlen].hex().upper()
             i += rlen
-        if ctx == 1 and i < len(data):  # 3G → AUTN
+        if ctx == 1 and i < len(data):  # 3G/EPS/5G → AUTN
             alen = data[i]
             i += 1
-            result['autn'] = data[i:i + alen].hex().upper()
+            autn = data[i:i + alen]
+            result['autn'] = autn.hex().upper()
+            # AUTN = SQN⊕AK (6) || AMF (2) || MAC-A (8)  (TS 33.102)
+            if len(autn) >= 16:
+                result['sqn_ak'] = autn[0:6].hex().upper()
+                result['amf'] = autn[6:8].hex().upper()
+                result['mac'] = autn[8:16].hex().upper()
     return result
 
 

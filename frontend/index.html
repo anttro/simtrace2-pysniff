@@ -454,7 +454,7 @@ function cmd_description(m) {
 function sw_text(m) {
     const d = m.decoded;
     if (!d || !d.sw) return '';
-    return d.sw.sw1 + ' ' + d.sw.sw2;
+    return (d.sw.sw1 + ' ' + d.sw.sw2).toUpperCase();
 }
 
 function sw_class(m) {
@@ -536,7 +536,11 @@ function responseRows(resp) {
         if (resp.ck) rows.push(['CK', resp.ck]);
         if (resp.ik) rows.push(['IK', resp.ik]);
         if (resp.kc) rows.push(['Kc', resp.kc]);
-        if (resp.auts) rows.push(['AUTS', resp.auts]);
+        if (resp.auts) {
+            rows.push(['AUTS', resp.auts]);
+            if (resp.sqn_ak) rows.push(['SQN⊕AK', resp.sqn_ak + ' (concealed)']);
+            if (resp.mac_s) rows.push(['MAC-S', resp.mac_s]);
+        }
     }
 
     if (resp.code !== undefined) {
@@ -564,10 +568,15 @@ function cmdRows(cmd) {
     const rows = [];
 
     // AUTHENTICATE command body
-    if (cmd.context !== undefined) {
-        rows.push(['Auth context', cmd.context]);
+    if (cmd.rand !== undefined || cmd.autn !== undefined || cmd.specific_key) {
+        if (cmd.specific_key) rows.push(['Key', 'specific reference data']);
         if (cmd.rand) rows.push(['RAND', cmd.rand]);
-        if (cmd.autn) rows.push(['AUTN', cmd.autn]);
+        if (cmd.autn) {
+            rows.push(['AUTN', cmd.autn]);
+            if (cmd.sqn_ak) rows.push(['SQN⊕AK', cmd.sqn_ak + ' (concealed)']);
+            if (cmd.amf) rows.push(['AMF', cmd.amf]);
+            if (cmd.mac) rows.push(['MAC', cmd.mac]);
+        }
     }
 
     // ENVELOPE fields

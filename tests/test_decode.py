@@ -361,16 +361,38 @@ class TestAuthCommand(unittest.TestCase):
         r = decode_message(bytes.fromhex(
             '0088008122104A75BA425D438C549EF35BA5E3DD53051065E04D80E4DC8000A5C7FD842F41395E6135'))
         cmd = r['cmd']
-        self.assertEqual(cmd['context'], '3G (UMTS)')
+        self.assertNotIn('context', cmd)
+        self.assertEqual(cmd['specific_key'], True)
         self.assertEqual(cmd['rand'], '4A75BA425D438C549EF35BA5E3DD5305')
         self.assertEqual(cmd['autn'], '65E04D80E4DC8000A5C7FD842F41395E')
+        self.assertEqual(cmd['sqn_ak'], '65E04D80E4DC')
+        self.assertEqual(cmd['amf'], '8000')
+        self.assertEqual(cmd['mac'], 'A5C7FD842F41395E')
+
+    def test_auth_p2_context(self):
+        r = decode_message(bytes.fromhex(
+            '0088008122104A75BA425D438C549EF35BA5E3DD53051065E04D80E4DC8000A5C7FD842F41395E6135'))
+        p2 = r['p2']
+        self.assertEqual(p2['raw'], '81')
+        self.assertIn('3G/EPS/5G context', p2['bits'])
+        self.assertIn('Specific reference data', p2['bits'])
 
     def test_gsm_rand_only(self):
         from simtrace2_pysniff.server.decode import _decode_auth_cmd
         r = _decode_auth_cmd(bytes.fromhex('10' + '00' * 16), 0x00)
-        self.assertEqual(r['context'], 'GSM')
+        self.assertNotIn('context', r)
+        self.assertNotIn('specific_key', r)
         self.assertEqual(r['rand'], '00' * 16)
         self.assertNotIn('autn', r)
+
+    def test_sync_fail_auts(self):
+        from simtrace2_pysniff.server.decode import _decode_auth
+        auts = bytes.fromhex('010203040506' + '0a0b0c0d0e0f1011')
+        r = _decode_auth(b'\xdc' + bytes([len(auts)]) + auts)
+        self.assertEqual(r['status'], 'sync fail')
+        self.assertEqual(r['auts'], auts.hex().upper())
+        self.assertEqual(r['sqn_ak'], '010203040506')
+        self.assertEqual(r['mac_s'], '0A0B0C0D0E0F1011')
 
 
 class TestEventDownload(unittest.TestCase):
