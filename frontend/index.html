@@ -647,6 +647,33 @@ function cmdRows(cmd) {
         }
         if (t.text !== undefined) rows.push(['TP-UD', t.text]);
         if (t.payload) rows.push(['TP-UD (payload)', t.payload]);
+
+        const sec = t.secured;
+        if (sec && !sec.raw) {
+            rows.push(['Secured packet', 'CPL ' + sec.cpl + ' · CHL ' + sec.chl]);
+            const s = sec.spi || {};
+            rows.push(['SPI', '0x' + (s.hex || '') + ' — ' + (s.counter || '') +
+                (s.ciphering ? ', ciphering' : '') + ', ' + (s.rc_cc_ds || '') + ', ' + (s.por || '')]);
+            rows.push(['KIc', 'key ' + sec.kic.key + ' — ' + sec.kic.algo]);
+            rows.push(['KID', 'key ' + sec.kid.key + ' — ' + sec.kid.algo]);
+            rows.push(['TAR', '0x' + sec.tar]);
+            rows.push(['CNTR', '0x' + sec.cntr]);
+            rows.push(['PCNTR', sec.pcntr]);
+            if (sec.rc_cc_ds) rows.push(['RC/CC/DS', sec.rc_cc_ds]);
+            rows.push(['Secured data', sec.data]);
+        }
+
+        const rp = t.response_packet;
+        if (rp && !rp.raw) {
+            rows.push(['Response packet', 'RPL ' + rp.rpl + ' · RHL ' + rp.rhl]);
+            rows.push(['TAR', '0x' + rp.tar]);
+            rows.push(['CNTR', '0x' + rp.cntr]);
+            rows.push(['PCNTR', rp.pcntr]);
+            const st = rp.status || {};
+            rows.push(['Status', '0x' + st.code + (st.name ? ' — ' + st.name : '')]);
+            if (rp.rc_cc_ds) rows.push(['RC/CC/DS', rp.rc_cc_ds]);
+            rows.push(['Response data', rp.data]);
+        }
     }
 
     if (!rows.length) return '';
@@ -822,7 +849,11 @@ function showDetail(msg, entry) {
 
     let p1p2 = '';
     if (decoded.p1p2) {
-        p1p2 = `<tr><td class="label">P1-P2</td><td class="value">0x${hx(decoded.p1p2.value, 4)} — ${decoded.p1p2.label}: ${decoded.p1p2.value}</td></tr>`;
+        if (decoded.p1p2.unused) {
+            p1p2 = `<tr><td class="label">P1, P2</td><td class="value">0x${hx(decoded.p1p2.value, 4)} (RFU)</td></tr>`;
+        } else {
+            p1p2 = `<tr><td class="label">P1-P2</td><td class="value">0x${hx(decoded.p1p2.value, 4)} — ${decoded.p1p2.label}: ${decoded.p1p2.value}</td></tr>`;
+        }
     }
     let p1 = '';
     if (decoded.p1) {

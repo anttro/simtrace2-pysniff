@@ -487,11 +487,47 @@ class TestSmTpdu(unittest.TestCase):
     def test_sim_data_download(self):
         from simtrace2_pysniff.server.decode import _decode_sm_tpdu
         oa = b'\x91' + self._bcd('79031234567')
-        tpdu = (b'\x00' + bytes([11]) + oa + b'\x7f\x04' + b'\x00' * 7 +
-                b'\x10' + bytes(range(16)))
+        ud = bytes.fromhex('02700000200d000000000000020000000000000010100102a2090804420435044104420600')
+        tpdu = (b'\x44' + bytes([11]) + oa + b'\x7f\x04' + b'\x00' * 7 +
+                bytes([len(ud)]) + ud)
         r = _decode_sm_tpdu(tpdu)
         self.assertEqual(r['pid_name'], 'SIM data download (secured packet)')
-        self.assertEqual(r['payload'], '000102030405060708090A0B0C0D0E0F')
+        self.assertEqual(r['udh'][0]['name'], 'Command Packet Identifier (CPI)')
+        self.assertEqual(r['secured']['cpl'], 32)
+        self.assertEqual(r['secured']['chl'], 13)
+        self.assertEqual(r['secured']['spi']['counter'], 'no counter')
+        self.assertEqual(r['secured']['spi']['rc_cc_ds'], 'none')
+        self.assertEqual(r['secured']['tar'], '000002')
+        self.assertEqual(r['secured']['cntr'], '0000000000')
+        self.assertEqual(r['secured']['data'], '0010100102A2090804420435044104420600')
+
+    def test_response_packet(self):
+        from simtrace2_pysniff.server.decode import _decode_response_packet
+        body = bytes.fromhex('001f0a00000000000000500000ab12800101230d08a0000001510000000f9a9000')
+        r = _decode_response_packet(body)
+        self.assertEqual(r['rpl'], 31)
+        self.assertEqual(r['rhl'], 10)
+        self.assertEqual(r['tar'], '000000')
+        self.assertEqual(r['cntr'], '0000000050')
+        self.assertEqual(r['pcntr'], 0)
+        self.assertEqual(r['status'], {'code': '00', 'name': 'PoR OK'})
+        self.assertEqual(r['data'], 'AB12800101230D08A0000001510000000F9A9000')
+
+    def test_secured_packet_fallback(self):
+        from simtrace2_pysniff.server.decode import _decode_secured_packet
+        self.assertEqual(_decode_secured_packet(bytes.fromhex('0001')), {'raw': '0001'})
+
+    def test_send_sm_response_packet(self):
+        from simtrace2_pysniff.server.decode import _decode_sm_tpdu
+        tpdu = bytes.fromhex('41000481112200f624027100001f0a00000000000000500000ab12800101230d08a0000001510000000f9a9000')
+        r = _decode_sm_tpdu(tpdu)
+        self.assertEqual(r['mti'], 'SMS-SUBMIT')
+        self.assertEqual(r['da'], '1122')
+        self.assertEqual(r['udh'][0]['name'], 'Response Packet Identifier (RPI)')
+        self.assertEqual(r['response_packet']['rpl'], 31)
+        self.assertEqual(r['response_packet']['cntr'], '0000000050')
+        self.assertEqual(r['response_packet']['status'], {'code': '00', 'name': 'PoR OK'})
+        self.assertEqual(r['response_packet']['data'], 'AB12800101230D08A0000001510000000F9A9000')
 
     def test_deliver_scts(self):
         from simtrace2_pysniff.server.decode import _decode_sm_tpdu
@@ -1093,13 +1129,24 @@ class TestP1P2(unittest.TestCase):
         self.assertEqual(r['p1p2'], {'label': 'Tag', 'value': 0x50})
 
     def test_commands_always_have_p1p2(self):
-        # FETCH and GET RESPONSE have P1/P2 (raw '00') even without a spec.
+        # FETCH and GET RESPONSE have unused P1/P2 (always '00') — RFU.
         r = decode_message(bytes.fromhex('801200000fd00d8103010300820281820402011e9000'))
-        self.assertEqual(r['p1'], {'raw': '00'})
-        self.assertEqual(r['p2'], {'raw': '00'})
+        self.assertEqual(r['p1p2'], {'unused': True, 'value': 0})
         r = decode_message(bytes.fromhex('00c0000000'), prev={'ins': 0xA4, 'ins_name': 'SELECT', 'sw1': '61'})
-        self.assertEqual(r['p1'], {'raw': '00'})
-        self.assertEqual(r['p2'], {'raw': '00'})
+        self.assertEqual(r['p1p2'], {'unused': True, 'value': 0})
+
+    def test_increase_p1p2_unused(self):
+        r = decode_message(bytes.fromhex('80320000030100000000'))
+        self.assertEqual(r['p1p2'], {'unused': True, 'value': 0})
+
+    def test_deactivate_activate_file_p1(self):
+        r = decode_message(bytes.fromhex('00040000126f0a'))
+        self.assertEqual(r['p1']['name'], 'EF by file ID')
+        self.assertEqual(r['p2']['name'], 'No indication')
+        r = decode_message(bytes.fromhex('00040800123f002f00'))
+        self.assertEqual(r['p1']['name'], 'Path from MF')
+        r = decode_message(bytes.fromhex('00040900122f00'))
+        self.assertEqual(r['p1']['name'], 'Path from current DF')
 
 
 if __name__ == '__main__':

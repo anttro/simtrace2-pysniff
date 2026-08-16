@@ -535,6 +535,7 @@ APDU_SPEC = {
     },
     0x21: {
         'name': 'VERIFY',
+        'p1p2': {'unused': True},
         'body': {'label': 'Data'},
     },
     0x24: {
@@ -579,6 +580,7 @@ APDU_SPEC = {
     },
     0x84: {
         'name': 'GET CHALLENGE',
+        'p1p2': {'unused': True},
         'body': None,
     },
     0x70: {
@@ -589,34 +591,40 @@ APDU_SPEC = {
     },
     0xC0: {
         'name': 'GET RESPONSE',
+        'p1p2': {'unused': True},
         'body': None,
     },
     0xC2: {
         'name': 'ENVELOPE',
+        'p1p2': {'unused': True},
         'body': {'label': 'TLV data'},
     },
     0x12: {
         'name': 'FETCH',
+        'p1p2': {'unused': True},
         'body': None,
     },
     0x14: {
         'name': 'TERMINAL RESPONSE',
+        'p1p2': {'unused': True},
         'body': {'label': 'TLV data'},
     },
     0x32: {
         'name': 'INCREASE',
-        'p1p2': {'fmt': 'uint16be', 'label': 'Value'},
+        'p1p2': {'unused': True},
         'body': {'label': 'Data'},
     },
     0x04: {
         'name': 'DEACTIVATE FILE',
-        'p1p2': {'fmt': 'uint16be', 'label': 'File ID'},
-        'body': None,
+        'p1': {0x00: 'EF by file ID', 0x08: 'Path from MF', 0x09: 'Path from current DF'},
+        'p2': {0x00: 'No indication'},
+        'body': {'label': 'File ID/path'},
     },
     0x44: {
         'name': 'ACTIVATE FILE',
-        'p1p2': {'fmt': 'uint16be', 'label': 'File ID'},
-        'body': None,
+        'p1': {0x00: 'EF by file ID', 0x08: 'Path from MF', 0x09: 'Path from current DF'},
+        'p2': {0x00: 'No indication'},
+        'body': {'label': 'File ID/path'},
     },
     0xF2: {
         'name': 'STATUS',
@@ -627,6 +635,7 @@ APDU_SPEC = {
     },
     0xE0: {
         'name': 'CREATE FILE',
+        'p1p2': {'unused': True},
         'body': {'label': 'TLV data'},
     },
     0xE4: {
@@ -637,6 +646,7 @@ APDU_SPEC = {
     },
     0xAA: {
         'name': 'TERMINAL CAPABILITY',
+        'p1p2': {'unused': True},
         'body': {'label': 'TLV data'},
     },
     0x73: {
@@ -649,6 +659,7 @@ APDU_SPEC = {
     },
     0x78: {
         'name': 'GET IDENTITY',
+        'p1p2': {'unused': True},
         'body': {'label': 'TLV data'},
     },
     0xA2: {
@@ -685,10 +696,12 @@ APDU_SPEC = {
     },
     0x10: {
         'name': 'TERMINAL PROFILE',
+        'p1p2': {'unused': True},
         'body': {'label': 'TLV data'},
     },
     0x76: {
         'name': 'SUSPEND UICC',
+        'p1p2': {'unused': True},
         'body': None,
     },
     0xCA: {
@@ -703,6 +716,7 @@ APDU_SPEC = {
     },
     0xE2: {
         'name': 'STORE DATA',
+        'p1p2': {'unused': True},
         'body': {'label': 'TLV data'},
     },
 }
@@ -1444,6 +1458,8 @@ IEI_NAMES = {
     0x24: 'National Language Single Shift',
     0x25: 'National Language Locking Shift',
     0x26: 'Filler',
+    0x70: 'Command Packet Identifier (CPI)',
+    0x71: 'Response Packet Identifier (RPI)',
 }
 
 _SPECIAL_SMS_TYPES = {0: 'voice', 1: 'fax', 2: 'email', 3: 'other'}
@@ -1656,22 +1672,164 @@ def _decode_sm_tpdu(data):
     return result
 
 
+# TS 102 225 §5.1.1 — SPI bit-field names
+_OTA_COUNTER = {0: 'no counter', 1: 'counter (no replay/seq check)',
+                2: 'counter must be higher', 3: 'counter must be one higher'}
+_OTA_RC_CC_DS = {0: 'none', 1: 'RC', 2: 'CC', 3: 'DS'}
+_OTA_POR = {0: 'no PoR', 1: 'PoR required', 2: 'PoR only on error'}
+
+# TS 102 225 §5.1.2 / §5.1.3 — KIc / KID algorithms (low nibble)
+_KIC_ALGO = {0: 'implicit', 1: 'DES', 2: 'AES-CBC', 5: '3DES-CBC (2 keys)', 9: '3DES-CBC (3 keys)'}
+_KID_CC_ALGO = {0: 'implicit', 1: 'DES', 5: '3DES-CBC', 2: 'AES-CMAC'}
+_KID_RC_ALGO = {0: 'implicit', 1: 'CRC16', 5: 'CRC32', 3: 'proprietary'}
+
+# TS 102 225 §5.2 Table 5 + TS 31.115 §7 — Response status codes
+RESPONSE_STATUS = {
+    0x00: 'PoR OK',
+    0x01: 'RC/CC/DS failed',
+    0x02: 'CNTR low',
+    0x03: 'CNTR high',
+    0x04: 'CNTR blocked',
+    0x05: 'Ciphering error',
+    0x06: 'Unidentified security error',
+    0x07: 'Insufficient memory',
+    0x08: 'More time needed',
+    0x09: 'TAR unknown',
+    0x0A: 'Insufficient security level',
+    0x0B: 'Actual response data to be sent using SMS-SUBMIT',
+    0x0C: 'Actual response data to be sent using USSD',
+}
+
+
+def _udh_ieis(udh):
+    """Extract the numeric IEI values from a raw UDH byte string."""
+    ieis = set()
+    i = 0
+    while i + 2 <= len(udh):
+        ieis.add(udh[i])
+        i += 2 + udh[i + 1]
+    return ieis
+
+
+def _decode_secured_packet(body):
+    """Decode a secured Command Packet (TS 102 225 §5.1 / TS 31.115 §4.2).
+
+    *body* is the TP-UD remainder after the UDH (CPI IEI 0x70).  Returns a
+    dict of the decoded header fields; ``{'raw': hex}`` when unparseable.
+    """
+    if not body or len(body) < 16:
+        return {'raw': body.hex().upper()} if body else {}
+    cpl = int.from_bytes(body[:2], 'big')
+    chl = body[2]
+    spi = body[3:5]
+    kic = body[5]
+    kid = body[6]
+    tar = body[7:10]
+    cntr = body[10:15]
+    pcntr = body[15]
+    spi1, spi2 = spi[0], spi[1]
+    rc_cc_ds_kind = spi1 & 0x03
+    rc_cc_ds_len = max(0, chl - 13)  # 13 = SPI+KIc+KID+TAR+CNTR+PCNTR
+    rc_cc_ds = body[16:16 + rc_cc_ds_len]
+    data = body[16 + rc_cc_ds_len:]
+
+    result = {
+        'cpl': cpl,
+        'chl': chl,
+        'spi': {
+            'hex': spi.hex().upper(),
+            'counter': _OTA_COUNTER.get((spi1 >> 4) & 0x03, 'reserved'),
+            'ciphering': bool(spi1 & 0x08),
+            'rc_cc_ds': _OTA_RC_CC_DS.get(rc_cc_ds_kind, 'reserved'),
+            'por': _OTA_POR.get(spi2 & 0x03, 'reserved'),
+            'por_rc_cc_ds': _OTA_RC_CC_DS.get((spi2 >> 2) & 0x03, 'reserved'),
+            'por_ciphered': bool(spi2 & 0x20),
+        },
+        'kic': {'key': kic >> 4, 'algo': _KIC_ALGO.get(kic & 0x0F, 'reserved')},
+        'tar': tar.hex().upper(),
+        'cntr': cntr.hex().upper(),
+        'pcntr': pcntr,
+        'data': data.hex().upper(),
+    }
+    if rc_cc_ds_kind == 2:  # CC
+        result['kid'] = {'key': kid >> 4, 'algo': _KID_CC_ALGO.get(kid & 0x0F, 'reserved')}
+    elif rc_cc_ds_kind == 1:  # RC
+        result['kid'] = {'key': kid >> 4, 'algo': _KID_RC_ALGO.get(kid & 0x0F, 'reserved')}
+    else:
+        result['kid'] = {'key': kid >> 4, 'algo': 'implicit'}
+    if rc_cc_ds:
+        result['rc_cc_ds'] = rc_cc_ds.hex().upper()
+    return result
+
+
+def _decode_response_packet(body):
+    """Decode a Response Packet (TS 102 225 §5.2 / TS 31.115 §4.4).
+
+    *body* is the TP-UD remainder after the UDH (RPI IEI 0x71).  Returns a
+    dict of the decoded header fields; ``{'raw': hex}`` when unparseable.
+    """
+    if not body or len(body) < 13:
+        return {'raw': body.hex().upper()} if body else {}
+    rpl = int.from_bytes(body[:2], 'big')
+    rhl = body[2]
+    tar = body[3:6]
+    cntr = body[6:11]
+    pcntr = body[11]
+    status = body[12]
+    rc_cc_ds_len = max(0, rhl - 10)  # 10 = TAR+CNTR+PCNTR+Status
+    rc_cc_ds = body[13:13 + rc_cc_ds_len]
+    data = body[13 + rc_cc_ds_len:]
+
+    result = {
+        'rpl': rpl,
+        'rhl': rhl,
+        'tar': tar.hex().upper(),
+        'cntr': cntr.hex().upper(),
+        'pcntr': pcntr,
+        'status': {'code': f'{status:02X}', 'name': RESPONSE_STATUS.get(status)},
+        'data': data.hex().upper(),
+    }
+    if rc_cc_ds:
+        result['rc_cc_ds'] = rc_cc_ds.hex().upper()
+    return result
+
+
 def _decode_ud(ud, udl, dcs, udhi, result):
     encoding, msg_class = _decode_dcs(dcs)
     result['encoding'] = encoding
     result['msg_class'] = msg_class
 
     pid = result.get('pid')
-    if pid == 0x7F:  # SIM data download → secured packet (show hex)
-        result['pid_name'] = 'SIM data download (secured packet)'
-        result['payload'] = ud[:udl].hex().upper()
+    ud_data = ud[:udl]
+
+    # Parse UDH first — the presence of a CPI/RPI IEI identifies a secured
+    # command/response packet (TS 31.115) regardless of the PID.
+    udh_ieis = set()
+    body = ud_data
+    if udhi and ud_data:
+        udhl = ud_data[0]
+        result['udhl'] = udhl
+        result['udh'] = _decode_udh(ud_data[1:1 + udhl])
+        udh_ieis = _udh_ieis(ud_data[1:1 + udhl])
+        body = ud_data[1 + udhl:]
+
+    if pid == 0x7F or 0x70 in udh_ieis:  # secured Command Packet
+        if pid == 0x7F:
+            result['pid_name'] = 'SIM data download (secured packet)'
+        secured = _decode_secured_packet(body)
+        result['secured'] = secured
+        if 'raw' in secured:
+            result['payload'] = secured['raw']
         return result
 
-    if udhi and ud:
-        udhl = ud[0]
-        result['udhl'] = udhl
-        result['udh'] = _decode_udh(ud[1:1 + udhl])
-        body = ud[1 + udhl:]
+    if 0x71 in udh_ieis:  # secured Response Packet (PoR)
+        rp = _decode_response_packet(body)
+        result['response_packet'] = rp
+        if 'raw' in rp:
+            result['payload'] = rp['raw']
+        return result
+
+    if udhi and ud_data:
         if encoding == 'GSM 7-bit':
             fill_bits = (udhl + 1) * 8
             n = udl - ((fill_bits + 6) // 7)
@@ -1685,12 +1843,12 @@ def _decode_ud(ud, udl, dcs, udhi, result):
                 result['text'] = text
     else:
         if encoding == 'GSM 7-bit':
-            result['text'] = _decode_gsm7(ud, udl)
+            result['text'] = _decode_gsm7(ud_data, udl)
         elif encoding == 'UCS2':
-            result['text'] = ud[:udl].decode('utf-16-be', errors='replace')
+            result['text'] = ud_data[:udl].decode('utf-16-be', errors='replace')
         else:
-            result['payload'] = ud[:udl].hex().upper()
-            text = _decode_8bit_text(ud[:udl])
+            result['payload'] = ud_data[:udl].hex().upper()
+            text = _decode_8bit_text(ud_data[:udl])
             if text is not None:
                 result['text'] = text
 
@@ -2451,7 +2609,7 @@ def _build_summary(result):
     p1 = result.get('p1')
     p2 = result.get('p2')
     p1txt = p2txt = None
-    if 'p1p2' in result:
+    if 'p1p2' in result and not result['p1p2'].get('unused'):
         p1txt = f"{result['p1p2']['label']}: 0x{result['p1p2']['value']:04X}"
     else:
         if p1:
@@ -2571,7 +2729,10 @@ def decode_message(raw_data, prev=None):
     if spec:
         if 'p1p2' in spec:
             offset = (p1 << 8) | p2
-            result['p1p2'] = {'label': spec['p1p2']['label'], 'value': offset}
+            if spec['p1p2'].get('unused'):
+                result['p1p2'] = {'unused': True, 'value': offset}
+            else:
+                result['p1p2'] = {'label': spec['p1p2']['label'], 'value': offset}
         else:
             result['p1'] = _decode_field(spec.get('p1', {}), p1)
             result['p2'] = _decode_field(spec.get('p2', {}), p2)
