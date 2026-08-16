@@ -997,7 +997,7 @@ def _decode_datetime(val):
     b = val[:7]
     if any((x >> 4) > 9 or (x & 0x0F) > 9 for x in b[:6]):
         return None
-    bcd = lambda x: (x >> 4) * 10 + (x & 0x0F)
+    bcd = lambda x: (x & 0x0F) * 10 + (x >> 4)
     yy, mm, dd, hh, mi, ss = (bcd(x) for x in b[:6])
     if not (1 <= mm <= 12 and 1 <= dd <= 31 and hh <= 23 and mi <= 59 and ss <= 59):
         return None
@@ -1547,10 +1547,12 @@ def _decode_gsm7_octets(data):
 
 
 def _decode_annex_a(raw):
-    """Decode a TS 102 221 Annex A text string (GsmOrUcs2).
+    """Decode a TS 102 221 Annex A / TS 24.008 text string (GsmOrUcs2).
 
-    Magic prefix 0x80/0x81/0x82 → UCS-2 variants; otherwise GSM 7-bit
-    default alphabet coded one octet per character.
+    Magic prefix 0x80/0x81/0x82 → UCS-2 variants (Annex A); 0x90 → UCS-2;
+    0x83-0x87 → GSM 7-bit packed; 0x88-0x8F → UCS-2 with the high bit of
+    the first octet cleared; otherwise GSM 7-bit default alphabet, packed
+    when any octet has the high bit set, else one octet per character.
     """
     if not raw:
         return ''
@@ -1558,6 +1560,12 @@ def _decode_annex_a(raw):
         return ''
     if raw[0] == 0x80:
         return raw[1:].decode('utf_16_be', 'replace')
+    if raw[0] == 0x90:
+        data = raw[1:]
+        null = data.find(b'\x00\x00')
+        if null != -1:
+            data = data[:null]
+        return data.decode('utf-16-be', 'replace')
     if raw[0] == 0x81 and len(raw) >= 3:
         num_chars = raw[1]
         base_ptr = raw[2] << 7
@@ -1578,7 +1586,22 @@ def _decode_annex_a(raw):
             else:
                 out.append(GSM7_ALPHABET[ch] if ch < len(GSM7_ALPHABET) else '?')
         return ''.join(out)
-    return _decode_gsm7_octets(raw)
+    if 0x83 <= raw[0] <= 0x87:
+        data = raw[1:].rstrip(b'\xff')
+        return _decode_gsm7(data, None) if data else ''
+    if raw[0] & 0x80:
+        ucs2 = bytearray(raw)
+        ucs2[0] &= 0x7F
+        while len(ucs2) >= 2 and ucs2[-1] == 0xFF and ucs2[-2] == 0xFF:
+            ucs2 = ucs2[:-2]
+        null = ucs2.find(b'\x00\x00')
+        if null != -1:
+            ucs2 = ucs2[:null]
+        return bytes(ucs2).decode('utf-16-be', 'replace')
+    data = raw.rstrip(b'\xff')
+    if all(b < 0x80 for b in data):
+        return _decode_gsm7_octets(data)
+    return _decode_gsm7(data, None)
 
 
 def _decode_dcs_text(raw):
@@ -1834,6 +1857,7 @@ def _decode_ud(ud, udl, dcs, udhi, result):
             fill_bits = (udhl + 1) * 8
             n = udl - ((fill_bits + 6) // 7)
             result['text'] = _decode_gsm7(body, n)
+            result['payload'] = body.hex().upper()
         elif encoding == 'UCS2':
             result['text'] = body[:udl].decode('utf-16-be', errors='replace')
         else:
@@ -1844,6 +1868,7 @@ def _decode_ud(ud, udl, dcs, udhi, result):
     else:
         if encoding == 'GSM 7-bit':
             result['text'] = _decode_gsm7(ud_data, udl)
+            result['payload'] = ud_data.hex().upper()
         elif encoding == 'UCS2':
             result['text'] = ud_data[:udl].decode('utf-16-be', errors='replace')
         else:
@@ -2334,17 +2359,34 @@ def _decode_arr(raw, p1=None):
     return {'rules': entries} if entries else {'raw': raw.hex().upper()}
 
 
+def _decode_pnn_text(value):
+    """Decode a TS 24.008 §10.5.3.5a Network Name (DCS byte + text)."""
+    if len(value) < 2:
+        return ''
+    dcs = value[0]
+    coding = (dcs >> 4) & 0x07
+    data = value[1:].rstrip(b'\xff')
+    if coding == 1:  # UCS2
+        null = data.find(b'\x00\x00')
+        if null != -1:
+            data = data[:null]
+        return data.decode('utf-16-be', 'replace')
+    if coding == 0:  # GSM 7-bit default alphabet
+        if all(b < 0x80 for b in data):
+            return _decode_gsm7_octets(data)
+        return _decode_gsm7(data, None)
+    return ''
+
+
 def _decode_pnn(raw, p1=None):
+    if not raw or all(b == 0xff for b in raw):
+        return {'empty': True}
     names = {}
     for tag, _length, value in parse_tlv(raw):
         if tag == 0x43:
-            names['full'] = _decode_annex_a(value)
+            names['full'] = _decode_pnn_text(value)
         elif tag == 0x45:
-            names['short'] = _decode_annex_a(value)
-    if not names:
-        txt = _decode_annex_a(raw.rstrip(b'\xff'))
-        if txt:
-            names['full'] = txt
+            names['short'] = _decode_pnn_text(value)
     return names or {'raw': raw.hex().upper()}
 
 

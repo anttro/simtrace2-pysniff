@@ -95,7 +95,7 @@ class TestCatDecoding(unittest.TestCase):
     def test_envelope_sms_pp_download(self):
         r = decode_message(bytes.fromhex(
             '80C2000022D120020283810607919740430900F40B1104038154F50004'
-            '260812143000210248699000'))
+            '628021410300210248699000'))
         self.assertEqual(r['ins_name'], 'ENVELOPE')
         self.assertEqual(r['cat_command'], 'SMS-PP DOWNLOAD')
         cmd = r['cmd']
@@ -326,10 +326,10 @@ class TestTrAdditionalInfo(unittest.TestCase):
     def test_pli_datetime(self):
         from simtrace2_pysniff.server.decode import _decode_datetime
         self.assertEqual(
-            _decode_datetime(bytes.fromhex('26081214300021')),
+            _decode_datetime(bytes.fromhex('62802141030021')),
             '2026-08-12 14:30:00 (UTC+03:00)')
         self.assertEqual(
-            _decode_datetime(bytes.fromhex('260812143000FF')),
+            _decode_datetime(bytes.fromhex('628021410300FF')),
             '2026-08-12 14:30:00 (UTCunknown)')
 
     def test_datetime_invalid_bcd(self):
@@ -338,7 +338,7 @@ class TestTrAdditionalInfo(unittest.TestCase):
 
     def test_datetime_invalid_semantics(self):
         from simtrace2_pysniff.server.decode import _decode_datetime
-        self.assertIsNone(_decode_datetime(bytes.fromhex('02209121654021')))
+        self.assertIsNone(_decode_datetime(bytes.fromhex('62310100000000')))
 
     def test_pli_language(self):
         from simtrace2_pysniff.server.decode import _decode_local_info, PLI_LANGUAGE
@@ -532,7 +532,7 @@ class TestSmTpdu(unittest.TestCase):
     def test_deliver_scts(self):
         from simtrace2_pysniff.server.decode import _decode_sm_tpdu
         oa = b'\x91' + self._bcd('79031234567')
-        scts = bytes.fromhex('26081214300021')
+        scts = bytes.fromhex('62802141030021')
         tpdu = (b'\x00' + bytes([11]) + oa + b'\x00\x00' + scts + b'\x00')
         r = _decode_sm_tpdu(tpdu)
         self.assertEqual(r['scts'], '2026-08-12 14:30:00 (UTC+03:00)')
@@ -609,7 +609,7 @@ class TestSmTpdu(unittest.TestCase):
     def test_submit_vp_absolute(self):
         from simtrace2_pysniff.server.decode import _decode_sm_tpdu
         da = b'\x81' + self._bcd('999')
-        scts = bytes.fromhex('26081214300021')
+        scts = bytes.fromhex('62802141030021')
         tpdu = b'\x11' + b'\x2A' + bytes([len(da)]) + da + b'\x00\x00' + scts + b'\x00'
         r = _decode_sm_tpdu(tpdu)
         self.assertEqual(r['vp'], '2026-08-12 14:30:00 (UTC+03:00)')
@@ -747,6 +747,37 @@ class TestAnnexA(unittest.TestCase):
         # 'Н' = U+041D, base 0x08<<7 = 0x400, offset 0x1D
         self.assertEqual(_decode_annex_a(bytes.fromhex('8101089D')), 'Н')
 
+    def test_ucs2_variant_90(self):
+        from simtrace2_pysniff.server.decode import _decode_annex_a
+        self.assertEqual(_decode_annex_a(b'\x90' + 'Привет'.encode('utf_16_be')), 'Привет')
+
+    def test_gsm7_packed(self):
+        from simtrace2_pysniff.server.decode import _decode_annex_a
+        self.assertEqual(_decode_annex_a(bytes.fromhex('41b6390c')), 'Alfa')
+
+
+class TestPnnSpn(unittest.TestCase):
+    def test_pnn_full_name(self):
+        from simtrace2_pysniff.server.decode import _decode_pnn
+        r = _decode_pnn(bytes.fromhex('43058441b6390c' + 'ff' * 13))
+        self.assertEqual(r['full'], 'Alfa')
+
+    def test_pnn_ucs2(self):
+        from simtrace2_pysniff.server.decode import _decode_pnn
+        v = b'\x90' + 'Привет'.encode('utf-16-be')
+        r = _decode_pnn(b'\x43' + bytes([len(v)]) + v)
+        self.assertEqual(r['full'], 'Привет')
+
+    def test_spn_ucs2_90(self):
+        from simtrace2_pysniff.server.decode import _decode_spn
+        r = _decode_spn(b'\x00' + b'\x90' + 'Привет'.encode('utf-16-be'))
+        self.assertEqual(r['name'], 'Привет')
+
+    def test_spn_gsm7(self):
+        from simtrace2_pysniff.server.decode import _decode_spn
+        r = _decode_spn(b'\x00' + bytes.fromhex('41b6390c'))
+        self.assertEqual(r['name'], 'Alfa')
+
 
 class TestDcsText(unittest.TestCase):
     def test_gsm7(self):
@@ -849,7 +880,7 @@ class TestSummary(unittest.TestCase):
     def test_envelope_sms_pp(self):
         r = decode_message(bytes.fromhex(
             '80C2000022D120020283810607919740430900F40B1104038154F50004'
-            '260812143000210248699000'))
+            '628021410300210248699000'))
         self.assertEqual(r['summary'], 'SMSC +79043490004, SMS-DELIVER from 455 «Hi»')
 
     def test_terminal_response(self):
