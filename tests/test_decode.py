@@ -266,7 +266,7 @@ class TestAuthResponse(unittest.TestCase):
         from simtrace2_pysniff.server.decode import _decode_auth
         data = bytes.fromhex('DB084CFA9017FD0DD85A101A2622F60E8ABD2C2497B9A8EFAF55E510CAA393329FF97868B9537369D5266A4F084D417B05ABFAFAEE')
         r = _decode_auth(data)
-        self.assertEqual(r['type'], '3G')
+        self.assertEqual(r['type'], '3G/EPS/5G')
         self.assertEqual(r['status'], 'success')
         self.assertEqual(r['res'], '4CFA9017FD0DD85A')
         self.assertEqual(r['ck'], '1A2622F60E8ABD2C2497B9A8EFAF55E5')
@@ -276,7 +276,7 @@ class TestAuthResponse(unittest.TestCase):
         from simtrace2_pysniff.server.decode import _decode_auth
         data = bytes.fromhex('DC0E' + '00' * 14)
         r = _decode_auth(data)
-        self.assertEqual(r['type'], '3G')
+        self.assertEqual(r['type'], '3G/EPS/5G')
         self.assertEqual(r['status'], 'sync fail')
         self.assertEqual(r['auts'], '00' * 14)
 
@@ -799,8 +799,10 @@ class TestSummary(unittest.TestCase):
         self.assertEqual(r['summary'], 'Record number: 1, use record number from P1')
 
     def test_verify_pin_no_leak(self):
-        r = decode_message(bytes.fromhex('0020000000'))
-        self.assertEqual(r['summary'], 'Verify PIN1')
+        # VERIFY PIN with P2 = 0x01 (PIN Appl 1): the PIN value must not leak.
+        r = decode_message(bytes.fromhex('0020000108' + '12' * 8))
+        self.assertEqual(r['summary'], 'PIN Appl 1')
+        self.assertNotIn('12', r['summary'])
 
     def test_fetch_setup_menu(self):
         r = decode_message(bytes.fromhex(
@@ -1061,6 +1063,43 @@ class TestSelectionTracking(unittest.TestCase):
             msgs = db.get_messages(sid)
             read = msgs[2]
             self.assertTrue(read['decoded']['file']['stale'])
+
+
+class TestP1P2(unittest.TestCase):
+    def test_search_record_p2_modes(self):
+        r = decode_message(bytes.fromhex('00a2010508ffffffffffffffff9000'))
+        self.assertEqual(r['p2']['bits'], ['Simple search (backward)'])
+        r = decode_message(bytes.fromhex('00a2010708ffffffffffffffff9000'))
+        self.assertEqual(r['p2']['bits'], ['Proprietary search'])
+
+    def test_pin_p2_reference(self):
+        r = decode_message(bytes.fromhex('0020000108' + '12' * 8))
+        self.assertEqual(r['p1']['name'], 'No indication')
+        self.assertEqual(r['p2']['name'], 'PIN Appl 1')
+        r = decode_message(bytes.fromhex('0020008108' + '12' * 8))
+        self.assertEqual(r['p2']['name'], 'Second PIN Appl 1')
+
+    def test_manage_channel_p2(self):
+        r = decode_message(bytes.fromhex('0070000300'))
+        self.assertEqual(r['p1']['name'], 'Open channel')
+        self.assertEqual(r['p2']['name'], 'Channel 3')
+
+    def test_retrieve_data_p2(self):
+        r = decode_message(bytes.fromhex('80cb008004' + '4f' * 4))
+        self.assertEqual(r['p2']['bits'], ['First block'])
+
+    def test_get_data_tag(self):
+        r = decode_message(bytes.fromhex('80ca005000'))
+        self.assertEqual(r['p1p2'], {'label': 'Tag', 'value': 0x50})
+
+    def test_commands_always_have_p1p2(self):
+        # FETCH and GET RESPONSE have P1/P2 (raw '00') even without a spec.
+        r = decode_message(bytes.fromhex('801200000fd00d8103010300820281820402011e9000'))
+        self.assertEqual(r['p1'], {'raw': '00'})
+        self.assertEqual(r['p2'], {'raw': '00'})
+        r = decode_message(bytes.fromhex('00c0000000'), prev={'ins': 0xA4, 'ins_name': 'SELECT', 'sw1': '61'})
+        self.assertEqual(r['p1'], {'raw': '00'})
+        self.assertEqual(r['p2'], {'raw': '00'})
 
 
 if __name__ == '__main__':

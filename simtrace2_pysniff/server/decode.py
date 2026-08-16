@@ -439,6 +439,17 @@ def select_target_fid(d):
 
 # ──────────────────── Per-INS specifications ────────────────────
 
+# TS 102 221 Table 9.3 — PIN mapping into key references (P2 of the PIN commands)
+PIN_KEY_REFS = {
+    0x01: 'PIN Appl 1', 0x02: 'PIN Appl 2', 0x03: 'PIN Appl 3', 0x04: 'PIN Appl 4',
+    0x05: 'PIN Appl 5', 0x06: 'PIN Appl 6', 0x07: 'PIN Appl 7', 0x08: 'PIN Appl 8',
+    0x0A: 'ADM1', 0x0B: 'ADM2', 0x0C: 'ADM3', 0x0D: 'ADM4', 0x0E: 'ADM5',
+    0x11: 'Universal PIN',
+    0x81: 'Second PIN Appl 1', 0x82: 'Second PIN Appl 2', 0x83: 'Second PIN Appl 3',
+    0x84: 'Second PIN Appl 4', 0x85: 'Second PIN Appl 5', 0x86: 'Second PIN Appl 6',
+    0x87: 'Second PIN Appl 7', 0x88: 'Second PIN Appl 8',
+}
+
 APDU_SPEC = {
     0xA4: {
         'name': 'SELECT',
@@ -518,10 +529,8 @@ APDU_SPEC = {
     },
     0x20: {
         'name': 'VERIFY PIN',
-        'p1': {0x00: 'Verify PIN1', 0x01: 'Verify PIN2', 0x02: 'Verify ADM2',
-               0x03: 'Verify ADM3', 0x04: 'Verify ADM4', 0x80: 'Verify PUK',
-               0x81: 'Verify ADM5'},
-        'p2': {0x00: 'No indication', 0x04: 'Reset PIN'},
+        'p1': {0x00: 'No indication'},
+        'p2': PIN_KEY_REFS,
         'body': {'label': 'PIN value'},
     },
     0x21: {
@@ -530,24 +539,26 @@ APDU_SPEC = {
     },
     0x24: {
         'name': 'CHANGE PIN',
-        'p1': {0x00: 'Change PIN1', 0x01: 'Change PIN2', 0x02: 'Change ADM2',
-               0x03: 'Change ADM3', 0x04: 'Change ADM4', 0x80: 'Change PUK',
-               0x81: 'Change ADM5'},
+        'p1': {0x00: 'No indication'},
+        'p2': PIN_KEY_REFS,
         'body': {'label': 'Old+new PIN'},
     },
     0x26: {
         'name': 'DISABLE PIN',
+        'p1': {0x00: 'No indication'},
+        'p2': PIN_KEY_REFS,
         'body': {'label': 'PIN value'},
     },
     0x28: {
         'name': 'ENABLE PIN',
+        'p1': {0x00: 'No indication'},
+        'p2': PIN_KEY_REFS,
         'body': {'label': 'PIN value'},
     },
     0x2C: {
         'name': 'UNBLOCK PIN',
-        'p1': {0x00: 'Unblock PIN1', 0x01: 'Unblock PIN2', 0x02: 'Unblock ADM2',
-               0x03: 'Unblock ADM3', 0x04: 'Unblock ADM4', 0x80: 'Unblock PUK',
-               0x81: 'Unblock ADM5'},
+        'p1': {0x00: 'No indication'},
+        'p2': PIN_KEY_REFS,
         'body': {'label': 'PUK + new PIN'},
     },
     0x88: {
@@ -573,6 +584,7 @@ APDU_SPEC = {
     0x70: {
         'name': 'MANAGE CHANNEL',
         'p1': {0x00: 'Open channel', 0x80: 'Close channel'},
+        'p2': {0x00: 'Auto-assign channel', **{n: f'Channel {n}' for n in range(1, 20)}},
         'body': None,
     },
     0xC0: {
@@ -610,6 +622,7 @@ APDU_SPEC = {
         'name': 'STATUS',
         'p1': {0x00: 'No indication', 0x01: 'Current DF', 0x02: 'EF under current DF',
                0x04: 'DF name', 0x0d: 'Applet status'},
+        'p2': {0x00: 'No indication'},
         'body': None,
     },
     0xE0: {
@@ -619,6 +632,7 @@ APDU_SPEC = {
     0xE4: {
         'name': 'DELETE FILE',
         'p1': {0x00: 'Delete EF/DF', 0x0c: 'Delete EF', 0x0d: 'Delete DF'},
+        'p2': {0x00: 'No indication'},
         'body': None,
     },
     0xAA: {
@@ -644,18 +658,29 @@ APDU_SPEC = {
             'label': 'Mode',
             'bits': {
                 0x04: 'Simple search (forward)',
-                0x02: 'Backward search',
-                0x01: 'Enhanced search',
+                0x05: 'Simple search (backward)',
+                0x06: 'Enhanced search',
+                0x07: 'Proprietary search',
             },
         },
         'body': {'label': 'Search pattern'},
     },
     0xCB: {
         'name': 'RETRIEVE DATA',
+        'p1': {0x00: 'No indication'},
+        'p2': {'label': 'Mode', 'bits': {
+            0x80: 'First block',
+            0x40: 'Retransmit previous block',
+        }},
         'body': {'label': 'TLV data'},
     },
     0xDB: {
         'name': 'SET DATA',
+        'p1': {0x00: 'No indication'},
+        'p2': {'label': 'Mode', 'bits': {
+            0x80: 'First block',
+            0x40: 'Retransmit previous block',
+        }},
         'body': {'label': 'TLV data'},
     },
     0x10: {
@@ -668,10 +693,12 @@ APDU_SPEC = {
     },
     0xCA: {
         'name': 'GET DATA',
+        'p1p2': {'fmt': 'uint16be', 'label': 'Tag'},
         'body': {'label': 'TLV data'},
     },
     0xDA: {
         'name': 'PUT DATA',
+        'p1p2': {'fmt': 'uint16be', 'label': 'Tag'},
         'body': {'label': 'TLV data'},
     },
     0xE2: {
@@ -1137,14 +1164,14 @@ def _decode_auth_3g(data):
             auts = data[2:2 + auts_len]
         else:
             auts = data[1:]
-        result = {'type': '3G', 'status': 'sync fail', 'auts': auts.hex().upper()}
+        result = {'type': '3G/EPS/5G', 'status': 'sync fail', 'auts': auts.hex().upper()}
         # AUTS = SQN_MS⊕AK (6) || MAC-S (8)  (TS 33.102)
         if len(auts) >= 14:
             result['sqn_ak'] = auts[0:6].hex().upper()
             result['mac_s'] = auts[6:14].hex().upper()
         return result
     # tag 0xDB: success → length-prefixed RES, CK, IK, (KC)
-    result = {'type': '3G', 'status': 'success'}
+    result = {'type': '3G/EPS/5G', 'status': 'success'}
     i = 1
     for name in ('res', 'ck', 'ik', 'kc'):
         if i >= len(data):
@@ -2546,10 +2573,8 @@ def decode_message(raw_data, prev=None):
             offset = (p1 << 8) | p2
             result['p1p2'] = {'label': spec['p1p2']['label'], 'value': offset}
         else:
-            if 'p1' in spec:
-                result['p1'] = _decode_field(spec['p1'], p1)
-            if 'p2' in spec:
-                result['p2'] = _decode_field(spec['p2'], p2)
+            result['p1'] = _decode_field(spec.get('p1', {}), p1)
+            result['p2'] = _decode_field(spec.get('p2', {}), p2)
 
     # Body: at least P3 bytes from byte 5; extra bytes may be SW
     remaining = raw_data[5:]

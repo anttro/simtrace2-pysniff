@@ -529,7 +529,7 @@ function responseRows(resp) {
     if (resp.life_cycle) rows.push(['Life cycle', resp.life_cycle]);
     if (resp.short_ef_id) rows.push(['Short EF ID', resp.short_ef_id]);
 
-    if (resp.type === 'GSM' || resp.type === '3G') {
+    if (resp.type === 'GSM' || resp.type === '3G/EPS/5G') {
         rows.push(['Auth', resp.type + (resp.status ? ' (' + resp.status + ')' : '')]);
         if (resp.sres) rows.push(['SRES', resp.sres]);
         if (resp.res) rows.push(['RES', resp.res]);
@@ -827,12 +827,12 @@ function showDetail(msg, entry) {
     let p1 = '';
     if (decoded.p1) {
         const n = decoded.p1.name || (decoded.p1.label && decoded.p1.value != null ? `${decoded.p1.label}: ${decoded.p1.value}` : '');
-        p1 = `<tr><td class="label">P1</td><td class="value">0x${(decoded.p1.raw || '').toUpperCase()} — <span class="name">${n}</span></td></tr>`;
+        p1 = `<tr><td class="label">P1</td><td class="value">0x${(decoded.p1.raw || '').toUpperCase()}${n ? ` — <span class="name">${n}</span>` : ''}</td></tr>`;
     }
     let p2 = '';
     if (decoded.p2) {
         const n = decoded.p2.name || (decoded.p2.bits ? decoded.p2.bits.join(', ') : '');
-        p2 = `<tr><td class="label">P2</td><td class="value">0x${(decoded.p2.raw || '').toUpperCase()} — <span class="name">${n}</span></td></tr>`;
+        p2 = `<tr><td class="label">P2</td><td class="value">0x${(decoded.p2.raw || '').toUpperCase()}${n ? ` — <span class="name">${n}</span>` : ''}</td></tr>`;
     }
 
     let sw = '';
