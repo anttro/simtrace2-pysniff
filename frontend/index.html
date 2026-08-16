@@ -111,6 +111,10 @@ body { font: 14px/1.5 system-ui, sans-serif; background: var(--bg); color: var(-
 .apdu-type.pps { color: var(--yellow); }
 .apdu-data { font-family: monospace; color: var(--text-dim); word-break: break-all; flex: 1; }
 .apdu-sw { font-family: monospace; color: var(--text-muted); white-space: nowrap; min-width: 52px; }
+.apdu-sw.sw-ok { color: var(--green); }
+.apdu-sw.sw-pending { color: var(--accent); }
+.apdu-sw.sw-warn { color: var(--warn); }
+.apdu-sw.sw-error { color: var(--error); }
 
 /* APDU detail panel */
 .apdu-detail { display: flex; flex-direction: column; max-height: 40%; overflow-y: auto; border-top: 2px solid var(--accent); background: var(--bg-panel); flex-shrink: 0; }
@@ -451,6 +455,17 @@ function sw_text(m) {
     const d = m.decoded;
     if (!d || !d.sw) return '';
     return d.sw.sw1 + ' ' + d.sw.sw2;
+}
+
+function sw_class(m) {
+    const d = m.decoded;
+    if (!d || !d.sw) return '';
+    const s = d.sw.sw1;
+    if (s === '90' || (s >= '92' && s <= '9f')) return 'sw-ok';
+    if (s === '61' || s === '91' || s === '6c') return 'sw-pending';
+    if (s === '62' || s === '63') return 'sw-warn';
+    if (s >= '64' && s <= '6f') return 'sw-error';
+    return '';
 }
 
 // ──────────────────── API ────────────────────
@@ -974,7 +989,7 @@ function renderMessages() {
         return `<div class="apdu-entry" data-idx="${idx}">
             <span class="apdu-time">${fmt_elapsed(m.elapsed)}</span>
             <span class="apdu-type ${typeCls}">${label}</span>
-            <span class="apdu-sw">${sw_text(m)}</span>
+            <span class="apdu-sw ${sw_class(m)}">${sw_text(m)}</span>
             <span class="apdu-data">${cmd_description(m)}</span>
         </div>`;
     }).join('');

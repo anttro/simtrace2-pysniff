@@ -2213,6 +2213,8 @@ def _decode_phase(raw, p1=None):
 
 def _decode_nai(raw, p1=None):
     """ISIM identity files (EF_IMPI/DOMAIN/IMPU): BER-TLV tag 0x80 + ASCII value."""
+    if not raw or all(b == 0xff for b in raw):
+        return {'empty': True}
     texts = []
     for tag, _length, value in parse_tlv(raw):
         if tag == 0x80:
@@ -2221,7 +2223,7 @@ def _decode_nai(raw, p1=None):
                 texts.append(txt)
     if texts:
         return {'text': texts[0] if len(texts) == 1 else ', '.join(texts)}
-    txt = raw.decode('ascii', 'replace').replace('\xff', '').strip()
+    txt = raw.rstrip(b'\xff').decode('ascii', 'replace').strip()
     return {'text': txt} if txt else {'raw': raw.hex().upper()}
 
 

@@ -901,6 +901,20 @@ class TestFileDecoders(unittest.TestCase):
         self.assertEqual(f['applications'][0]['label'], 'MegaFon')
         self.assertEqual(f['applications'][0]['aid'], 'A0000000871002FFFFF00189000001FF')
 
+    def test_nai_empty_record(self):
+        from simtrace2_pysniff.server.decode import _decode_file_data
+        # Unused ISIM record (all FF) must be 'empty', not garbage text.
+        f = _decode_file_data('6f04', b'\xff' * 75)
+        self.assertTrue(f['empty'])
+        self.assertNotIn('text', f)
+
+    def test_nai(self):
+        from simtrace2_pysniff.server.decode import _decode_file_data
+        f = _decode_file_data('6f04', bytes.fromhex(
+            '80357369703a32353030323639333537373333363840696d732e6d6e63'
+            '3030322e6d63633235302e336770706e6574776f726b2e6f7267'))
+        self.assertEqual(f['text'], 'sip:250026935773368@ims.mnc002.mcc250.3gppnetwork.org')
+
     def test_plmn_wact(self):
         from simtrace2_pysniff.server.decode import _decode_file_data
         # TS 51.011 §10.3.35: 5-byte entries (3 PLMN + 2 access tech).
