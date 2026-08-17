@@ -1180,5 +1180,74 @@ class TestP1P2(unittest.TestCase):
         self.assertEqual(r['p1']['name'], 'Path from current DF')
 
 
+class TestSwWrongLength(unittest.TestCase):
+    def test_6c(self):
+        from simtrace2_pysniff.server.decode import decode_sw
+        self.assertEqual(decode_sw(bytes.fromhex('6c38'))['name'],
+                         'Wrong length (Le): correct length is 0x38 (56 bytes)')
+
+    def test_62_unknown_is_unnamed(self):
+        from simtrace2_pysniff.server.decode import decode_sw
+        self.assertIsNone(decode_sw(bytes.fromhex('6205'))['name'])
+
+
+class TestStatusFcp(unittest.TestCase):
+    def test_status_body_is_fcp(self):
+        raw = bytes.fromhex(
+            '80f2000038'
+            '62368202782183027ff08410a0000000871002ff45ff0189020111008a01058b032f0608c60c90016083010183018183010a81040000039f'
+            '9000')
+        r = decode_message(raw)
+        self.assertEqual(r['ins_name'], 'STATUS')
+        self.assertEqual(r['sw']['sw1'], '90')
+        resp = r['response']
+        self.assertEqual(resp['template'], 'FCP')
+        self.assertEqual(resp['file_id'], '7FF0')
+        self.assertEqual(resp['df_name'], 'A0000000871002FF45FF018902011100')
+        self.assertEqual(resp['file_descriptor']['file_type'], 'DF or ADF')
+        self.assertEqual(resp['life_cycle'], 'operational state (activated)')
+
+
+class TestLengthMismatch(unittest.TestCase):
+    def test_lc_truncated(self):
+        # ENVELOPE with Lc=21, body missing (only SW captured).
+        r = decode_message(bytes.fromhex('80c20000159000'))
+        self.assertEqual(r['sw']['sw1'], '90')
+        self.assertEqual(r['sw']['sw2'], '00')
+        self.assertNotIn('body', r)
+        self.assertEqual(r['length_mismatch'],
+                         {'kind': 'truncated', 'expected': 21, 'actual': 0})
+
+    def test_lc_excessive(self):
+        # ENVELOPE with Lc=3 but 4 bytes of body + SW.
+        r = decode_message(bytes.fromhex('80c2000003d10102039000'))
+        self.assertEqual(r['length_mismatch'],
+                         {'kind': 'excessive', 'expected': 3, 'actual': 4})
+
+    def test_select_well_formed(self):
+        r = decode_message(bytes.fromhex('a0a40000023f009000'))
+        self.assertNotIn('length_mismatch', r)
+
+    def test_le_short_response_not_flagged(self):
+        # READ BINARY (Le) returning an error SW with no data is not "truncated".
+        r = decode_message(bytes.fromhex('00b08f00066a82'))
+        self.assertEqual(r['sw']['sw1'], '6a')
+        self.assertNotIn('length_mismatch', r)
+
+
+class TestRefresh(unittest.TestCase):
+    def test_uicc_reset(self):
+        r = decode_message(bytes.fromhex('801200000bd0098103010104820281829000'))
+        self.assertEqual(r['cat_command'], 'REFRESH')
+        self.assertEqual(r['cmd']['refresh_mode'], 'UICC Reset')
+        self.assertNotIn('file_list', r['cmd'])
+        self.assertNotIn('aid', r['cmd'])
+
+    def test_file_change_notification(self):
+        r = decode_message(bytes.fromhex('8012000011d00f81030101018202818292046f076f209000'))
+        self.assertEqual(r['cmd']['refresh_mode'], 'File Change Notification')
+        self.assertEqual(r['cmd']['file_list'], ['6F07', '6F20'])
+
+
 if __name__ == '__main__':
     unittest.main()

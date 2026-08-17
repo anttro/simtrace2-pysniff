@@ -67,8 +67,8 @@ def _sw_name(sw1, sw2):
 _SW_PATTERNS = {
     (0x63,): lambda s1, s2: ('PIN verification failed, %d retries remaining' % (s2 & 0x0f)
                               if s2 & 0xc0 == 0xc0 else None),
-    (0x62, 0x00): lambda s1, s2: 'Response: %d more bytes available' % s2,
     (0x61,): lambda s1, s2: 'Response: %d bytes available (use GET RESPONSE)' % s2,
+    (0x6c,): lambda s1, s2: 'Wrong length (Le): correct length is 0x%02X (%d bytes)' % (s2, s2),
     (0x9e,): lambda s1, s2: 'Normal processing, %d bytes of response' % s2,
     (0x9f,): lambda s1, s2: 'Normal processing, %d bytes of response' % s2,
 }
@@ -471,11 +471,13 @@ APDU_SPEC = {
     },
     0xB0: {
         'name': 'READ BINARY',
+        'le': True,
         'p1p2': {'fmt': 'uint16be', 'label': 'Offset'},
         'body': None,
     },
     0xB2: {
         'name': 'READ RECORD',
+        'le': True,
         'p1': {'fmt': 'uint8', 'label': 'Record number'},
         'p2': {
             'label': 'Mode',
@@ -492,6 +494,7 @@ APDU_SPEC = {
     },
     0xB1: {
         'name': 'READ RECORD (B1)',
+        'le': True,
         'p1': {'fmt': 'uint8', 'label': 'Record number'},
         'p2': {
             'label': 'Mode',
@@ -580,6 +583,7 @@ APDU_SPEC = {
     },
     0x84: {
         'name': 'GET CHALLENGE',
+        'le': True,
         'p1p2': {'unused': True},
         'body': None,
     },
@@ -591,6 +595,7 @@ APDU_SPEC = {
     },
     0xC0: {
         'name': 'GET RESPONSE',
+        'le': True,
         'p1p2': {'unused': True},
         'body': None,
     },
@@ -601,6 +606,7 @@ APDU_SPEC = {
     },
     0x12: {
         'name': 'FETCH',
+        'le': True,
         'p1p2': {'unused': True},
         'body': None,
     },
@@ -628,6 +634,7 @@ APDU_SPEC = {
     },
     0xF2: {
         'name': 'STATUS',
+        'le': True,
         'p1': {0x00: 'No indication', 0x01: 'Current DF', 0x02: 'EF under current DF',
                0x04: 'DF name', 0x0d: 'Applet status'},
         'p2': {0x00: 'No indication'},
@@ -678,6 +685,7 @@ APDU_SPEC = {
     },
     0xCB: {
         'name': 'RETRIEVE DATA',
+        'le': True,
         'p1': {0x00: 'No indication'},
         'p2': {'label': 'Mode', 'bits': {
             0x80: 'First block',
@@ -706,6 +714,7 @@ APDU_SPEC = {
     },
     0xCA: {
         'name': 'GET DATA',
+        'le': True,
         'p1p2': {'fmt': 'uint16be', 'label': 'Tag'},
         'body': {'label': 'TLV data'},
     },
@@ -770,6 +779,21 @@ CAT_COMMAND_TYPES = {
     0x72: 'COMMAND CONTAINER',
     0x73: 'ENCAPSULATED SESSION CONTROL',
     0x81: 'END OF PROACTIVE SESSION',
+}
+
+# TS 102 223 §8.6 — REFRESH command qualifier (mode)
+REFRESH_MODES = {
+    0x00: 'NAA Initialization and Full File Change Notification',
+    0x01: 'File Change Notification',
+    0x02: 'NAA Initialization and File Change Notification',
+    0x03: 'NAA Initialization',
+    0x04: 'UICC Reset',
+    0x05: 'NAA Application Reset',
+    0x06: 'NAA Session Reset',
+    0x07: 'Reserved (Steering of Roaming)',
+    0x08: 'Reserved (Steering of Roaming for I-WLAN)',
+    0x09: 'eUICC Profile State Change',
+    0x0A: 'Application Update',
 }
 
 ENVELOPE_TYPES = {
@@ -1978,8 +2002,10 @@ _P_ADDRESS = 0x06
 _P_SMS_TPDU = 0x0B
 _P_TEXT_STRING = 0x0D
 _P_ITEM = 0x0F
+_P_FILE_LIST = 0x12
 _P_RESPONSE_LEN = 0x11
 _P_EVENT_LIST = 0x19
+_P_AID = 0x2F
 
 
 def _decode_proactive(body):
@@ -1999,12 +2025,17 @@ def _decode_proactive(body):
         return None
 
     cmd_type = None
+    qualifier = None
     result = {}
     items = []
+    file_list = []
+    aid = None
     for tag, _length, value in inner:
         base = tag & 0x7F
         if base == _P_CMD_DETAILS and len(value) >= 2:
             cmd_type = value[1]
+            if len(value) >= 3:
+                qualifier = value[2]
         elif base == _P_ALPHA_ID and value:
             result['title'] = _decode_annex_a(value)
         elif base == _P_TEXT_STRING and value:
@@ -2021,10 +2052,20 @@ def _decode_proactive(body):
             result['events'] = [EVENT_TYPES.get(e, f'0x{e:02X}') for e in value]
         elif base == _P_ADDRESS and value:
             result['address'] = _decode_bcd_address(value)
+        elif base == _P_FILE_LIST and value:
+            file_list = [value[i:i + 2].hex().upper() for i in range(0, len(value), 2)]
+        elif base == _P_AID and value:
+            aid = value.hex().upper()
 
     if cmd_type is None:
         return None
     result['type'] = CAT_COMMAND_TYPES.get(cmd_type, f'0x{cmd_type:02X}')
+    if cmd_type == 0x01 and qualifier is not None:  # REFRESH
+        result['refresh_mode'] = REFRESH_MODES.get(qualifier, f'0x{qualifier:02X}')
+    if file_list:
+        result['file_list'] = file_list
+    if aid:
+        result['aid'] = aid
     if items:
         result['items'] = items
     return result
@@ -2688,6 +2729,8 @@ def _build_summary(result):
     if cmd:
         if cmd.get('context'):
             parts.append(cmd['context'])
+        if cmd.get('refresh_mode'):
+            parts.append(cmd['refresh_mode'])
         if cmd.get('title'):
             parts.append(cmd['title'])
         items = cmd.get('items')
@@ -2784,7 +2827,7 @@ def decode_message(raw_data, prev=None):
     extra_total = len(remaining) - p3
     sw_bytes = None
 
-    if extra_total >= 2:
+    if len(remaining) >= 2 and (extra_total >= 2 or extra_total < 0):
         sw_candidate = remaining[-2:]
         if sw_candidate[0] in (0x60, 0x61, 0x62, 0x63, 0x64, 0x65,
                                0x66, 0x67, 0x68, 0x69, 0x6a, 0x6b,
@@ -2795,6 +2838,12 @@ def decode_message(raw_data, prev=None):
             sw_bytes = sw_candidate
 
     cmd_body_len = len(remaining) - 2 if sw_bytes else len(remaining)
+
+    # Length sanity: P3 (Lc/Le) vs actual data captured.
+    if cmd_body_len > p3:
+        result['length_mismatch'] = {'kind': 'excessive', 'expected': p3, 'actual': cmd_body_len}
+    elif cmd_body_len < p3 and not (spec and spec.get('le')):
+        result['length_mismatch'] = {'kind': 'truncated', 'expected': p3, 'actual': cmd_body_len}
 
     if cmd_body_len > 0:
         body = remaining[:cmd_body_len]
@@ -2826,6 +2875,10 @@ def decode_message(raw_data, prev=None):
                 result['cmd'] = _decode_envelope(body)
             elif ins == 0x12:  # FETCH → proactive command body
                 result['cmd'] = _decode_proactive(body)
+            elif ins == 0xF2:  # STATUS → response data is the FCP of the current DF/EF
+                fcp = _decode_fcp(body)
+                if fcp:
+                    result['response'] = fcp
 
         # File data decode for READ/UPDATE using the current selection.
         if ins in (0xB0, 0xB2, 0xD6, 0xDC) and prev and prev.get('sel'):

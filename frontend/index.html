@@ -610,6 +610,9 @@ function cmdRows(cmd) {
     }
 
     // Proactive command fields (FETCH)
+    if (cmd.refresh_mode) rows.push(['Refresh mode', cmd.refresh_mode]);
+    if (cmd.file_list) rows.push(['File list', cmd.file_list.join(', ')]);
+    if (cmd.aid) rows.push(['AID', cmd.aid]);
     if (cmd.title) rows.push(['Title', cmd.title]);
     if (cmd.text !== undefined) rows.push(['Text', cmd.text]);
     if (cmd.items) {
@@ -900,6 +903,11 @@ function showDetail(msg, entry) {
         ? `<tr><td class="label">Responding to</td><td class="name">${decoded.response_to}</td></tr>`
         : '';
 
+    const lm = decoded.length_mismatch;
+    const lmNote = lm
+        ? ` <span style="color:var(--error)">— ${lm.kind} (${lm.actual}/${lm.expected} bytes)</span>`
+        : '';
+
     d.innerHTML = `<div class="detail-header">
         <strong>${decoded.cat_command || decoded.ins_name}</strong>
         <span style="color:var(--text-muted)">${fmt_elapsed(msg.elapsed)}</span>
@@ -911,7 +919,7 @@ function showDetail(msg, entry) {
             <tr><td class="label">INS</td><td class="name">0x${(decoded.ins_hex || '').toUpperCase()} — ${decoded.ins_name}</td></tr>
             ${catRow}${respRow}${trRow}
             ${p1p2}${p1}${p2}
-            <tr><td class="label">P3</td><td class="value">0x${hx(decoded.p3, 2)} — ${decoded.p3} bytes</td></tr>
+            <tr><td class="label">P3</td><td class="value">0x${hx(decoded.p3, 2)} — ${decoded.p3} bytes${lmNote}</td></tr>
             ${body}
             ${cmdRows(decoded.cmd)}
             ${responseRows(decoded.response)}
