@@ -664,7 +664,7 @@ function cmdRows(cmd) {
 
         const sec = t.secured;
         if (sec && !sec.raw) {
-            rows.push(['Secured packet', 'CPL ' + sec.cpl + ' · CHL ' + sec.chl]);
+            rows.push(['Secured packet', 'Command Packet Length ' + sec.cpl + ' · Command Header Length ' + sec.chl]);
             const s = sec.spi || {};
             rows.push(['SPI', '0x' + (s.hex || '') + ' — ' + (s.counter || '') +
                 (s.ciphering ? ', ciphering' : '') + ', ' + (s.rc_cc_ds || '') + ', ' + (s.por || '')]);
@@ -679,7 +679,7 @@ function cmdRows(cmd) {
 
         const rp = t.response_packet;
         if (rp && !rp.raw) {
-            rows.push(['Response packet', 'RPL ' + rp.rpl + ' · RHL ' + rp.rhl]);
+            rows.push(['Response packet', 'Response Packet Length ' + rp.rpl + ' · Response Header Length ' + rp.rhl]);
             rows.push(['TAR', '0x' + rp.tar]);
             rows.push(['CNTR', '0x' + rp.cntr]);
             rows.push(['PCNTR', rp.pcntr]);

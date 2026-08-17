@@ -1727,7 +1727,7 @@ _OTA_POR = {0: 'no PoR', 1: 'PoR required', 2: 'PoR only on error'}
 
 # TS 102 225 §5.1.2 / §5.1.3 — KIc / KID algorithms (low nibble)
 _KIC_ALGO = {0: 'implicit', 1: 'DES', 2: 'AES-CBC', 5: '3DES-CBC (2 keys)', 9: '3DES-CBC (3 keys)'}
-_KID_CC_ALGO = {0: 'implicit', 1: 'DES', 5: '3DES-CBC', 2: 'AES-CMAC'}
+_KID_CC_ALGO = {0: 'implicit', 1: 'DES', 5: '3DES-CBC (2 keys)', 9: '3DES-CBC (3 keys)', 2: 'AES-CMAC'}
 _KID_RC_ALGO = {0: 'implicit', 1: 'CRC16', 5: 'CRC32', 3: 'proprietary'}
 
 # TS 102 225 §5.2 Table 5 + TS 31.115 §7 — Response status codes
@@ -1798,12 +1798,21 @@ def _decode_secured_packet(body):
         'pcntr': pcntr,
         'data': data.hex().upper(),
     }
+    kic_algo = _KIC_ALGO.get(kic & 0x0F, 'reserved')
+    if not (spi1 & 0x08):  # SPI says no ciphering → KIc unused
+        kic_algo += ' (unused)'
+    result['kic'] = {'key': kic >> 4, 'algo': kic_algo}
     if rc_cc_ds_kind == 2:  # CC
-        result['kid'] = {'key': kid >> 4, 'algo': _KID_CC_ALGO.get(kid & 0x0F, 'reserved')}
+        kid_algo = _KID_CC_ALGO.get(kid & 0x0F, 'reserved')
     elif rc_cc_ds_kind == 1:  # RC
-        result['kid'] = {'key': kid >> 4, 'algo': _KID_RC_ALGO.get(kid & 0x0F, 'reserved')}
-    else:
-        result['kid'] = {'key': kid >> 4, 'algo': 'implicit'}
+        kid_algo = _KID_RC_ALGO.get(kid & 0x0F, 'reserved')
+    elif rc_cc_ds_kind == 3:  # DS — no simple nibble table
+        kid_algo = 'DS'
+    else:  # none — decode the nibble anyway (CC interpretation)
+        kid_algo = _KID_CC_ALGO.get(kid & 0x0F, 'reserved')
+    if rc_cc_ds_kind == 0:
+        kid_algo += ' (unused)'
+    result['kid'] = {'key': kid >> 4, 'algo': kid_algo}
     if rc_cc_ds:
         result['rc_cc_ds'] = rc_cc_ds.hex().upper()
     return result
