@@ -133,6 +133,7 @@ KNOWN_FIDS = {
     '2f00': 'EF_DIR',
     '2f05': 'EF_PL',
     '2f06': 'EF_ARR',
+    '2f07': 'EF_ENV-CLASSES',
     '2f08': 'EF_UMPC',
     '2fe2': 'EF_ICCID',
 
@@ -437,6 +438,91 @@ def select_target_fid(d):
     return None
 
 
+# Short File Identifier (SFI) → FID, scoped to the containing DF.
+# SFI is only unique within a DF (TS 102 221 §8.3).  Sourced from the
+# normative SFI lists: TS 31.102 Annex H (USIM ADF, DF GSM-ACCESS) and
+# TS 102 221 Annex H (MF level).
+_SFI_BY_DF = {
+    '3f00': {   # MF (TS 102 221 Annex H)
+        0x02: '2fe2',   # EF_ICCID
+        0x05: '2f05',   # EF_PL
+        0x06: '2f06',   # EF_ARR
+        0x07: '2f07',   # EF_ENV-CLASSES (TS 102 671)
+        0x08: '2f08',   # EF_UMPC
+        0x1e: '2f00',   # EF_DIR
+    },
+    '7fff': {   # ADF_USIM (TS 31.102 Annex H H.1)
+        0x01: '6fb7',   # EF_ECC
+        0x02: '6f05',   # EF_LI
+        0x03: '6fad',   # EF_AD
+        0x04: '6f38',   # EF_UST
+        0x05: '6f56',   # EF_EST
+        0x06: '6f78',   # EF_ACC
+        0x07: '6f07',   # EF_IMSI
+        0x08: '6f08',   # EF_Keys
+        0x09: '6f09',   # EF_KeysPS
+        0x0a: '6f60',   # EF_PLMNwAcT
+        0x0b: '6f7e',   # EF_LOCI
+        0x0c: '6f73',   # EF_PSLOCI
+        0x0d: '6f7b',   # EF_FPLMN
+        0x0e: '6f48',   # EF_CBMID
+        0x0f: '6f5b',   # EF_START-HFN
+        0x10: '6f5c',   # EF_THRESHOLD
+        0x11: '6f61',   # EF_OPLMNwAcT
+        0x12: '6f31',   # EF_HPPLMN
+        0x13: '6f62',   # EF_HPLMNwAcT
+        0x14: '6f80',   # EF_ICI
+        0x15: '6f81',   # EF_OCI
+        0x16: '6f4f',   # EF_CCP2
+        0x17: '6f06',   # EF_ARR
+        0x18: '6fe4',   # EF_EPSNSC
+        0x19: '6fc5',   # EF_PNN
+        0x1a: '6fc6',   # EF_OPL
+        0x1b: '6fcd',   # EF_SPDI
+        0x1c: '6f39',   # EF_ACM
+        0x1d: '6fd9',   # EF_EHPLMN
+        0x1e: '6fe3',   # EF_EPSLOCI
+    },
+    '5f3b': {   # DF_GSM_ACCESS (TS 31.102 Annex H H.2)
+        0x01: '4f20',   # EF_Kc
+        0x02: '4f52',   # EF_KcGPRS
+    },
+}
+
+
+def _is_df_fid(fid):
+    """True if *fid* (2-hex-byte string) denotes a DF/ADF (MF, 7Fxx, 5Fxx)."""
+    return fid == '3f00' or fid.startswith('7f') or fid.startswith('5f')
+
+
+def selected_df_fid(d):
+    """Return the current DF after a SELECT, or None if the SELECT does not
+    (re)enter a DF.  Handles SELECT by FID (P1 00/01), by path (P1 08/09),
+    and by DF name/AID (P1 04)."""
+    if d.get('ins_hex') != 'a4':
+        return None
+    p1 = (d.get('p1') or {}).get('raw')
+    h = (d.get('body') or {}).get('hex') or ''
+    if p1 in ('00', '01'):
+        return h if len(h) == 4 and _is_df_fid(h) else None
+    if p1 in ('08', '09'):
+        comps = [h[i:i + 4] for i in range(0, len(h) - 3, 4)]
+        for comp in reversed(comps):
+            if _is_df_fid(comp):
+                return comp
+        return None
+    if p1 == '04':  # select by DF name (AID) → map known application AIDs
+        if h.startswith('a0000000871002'):   # USIM AID
+            return '7fff'
+        return None
+    return None
+
+
+def sfi_table(df):
+    """Return the SFI→FID table for a DF FID, or an empty dict."""
+    return _SFI_BY_DF.get(df or '', {})
+
+
 # ──────────────────── Per-INS specifications ────────────────────
 
 # TS 102 221 Table 9.3 — PIN mapping into key references (P2 of the PIN commands)
@@ -482,12 +568,9 @@ APDU_SPEC = {
         'p2': {
             'label': 'Mode',
             'bits': {
-                0x07: 'currently selected EF',
-                0x04: 'use record number from P1',
-                0x02: 'previous record',
-                0x03: 'next record',
-                0x05: 'first record',
-                0x06: 'last record',
+                0x02: 'next record',
+                0x03: 'previous record',
+                0x04: 'absolute mode (record number in P1)',
             },
         },
         'body': None,
@@ -499,12 +582,9 @@ APDU_SPEC = {
         'p2': {
             'label': 'Mode',
             'bits': {
-                0x07: 'currently selected EF',
-                0x04: 'use record number from P1',
-                0x02: 'previous record',
-                0x03: 'next record',
-                0x05: 'first record',
-                0x06: 'last record',
+                0x02: 'next record',
+                0x03: 'previous record',
+                0x04: 'absolute mode (record number in P1)',
             },
         },
         'body': None,
@@ -520,12 +600,9 @@ APDU_SPEC = {
         'p2': {
             'label': 'Mode',
             'bits': {
-                0x07: 'currently selected EF',
-                0x04: 'use record number from P1',
-                0x02: 'previous record',
-                0x03: 'next record',
-                0x05: 'first record',
-                0x06: 'last record',
+                0x02: 'next record',
+                0x03: 'previous record',
+                0x04: 'absolute mode (record number in P1)',
             },
         },
         'body': {'label': 'Data'},
@@ -1189,8 +1266,16 @@ def _decode_file_descriptor(value):
 
 
 def _decode_fcp(data):
-    """Decode an FCP/FCI/FMD template (TS 102 221 §11.1.1.3)."""
+    """Decode an FCP/FCI/FMD template (TS 102 221 §11.1.1.3).
+
+    SFI (tag 0x88) is resolved per TS 102 221 §11.1.2:
+    - length 1 → SFI = value >> 3 (bits b8..b4);
+    - length 0 → file does not support SFI;
+    - absent   → SFI = 5 LSBs of the FID (only if in range 1..30).
+    """
     result = {}
+    fid = None
+    sfi_seen = False
     for tag, _length, value in parse_tlv(data):
         if tag in (0x62, 0x64):  # outer template — recurse
             inner = _decode_fcp(value)
@@ -1210,11 +1295,15 @@ def _decode_fcp(data):
         elif tag == 0x81:
             result['total_file_size'] = int.from_bytes(value, 'big')
         elif tag == 0x88:
-            result['sfi'] = f'0x{value[0]:02X}' if value else None
+            sfi_seen = True
+            result['sfi'] = value[0] >> 3 if value else None
         elif tag == 0x8A:
             result['life_cycle'] = _LIFE_CYCLE.get(value[0] if value else 0, f'0x{(value[0] if value else 0):02X}')
         elif tag == 0xAB:
             result['short_ef_id'] = value.hex().upper()
+    if not sfi_seen and fid:
+        sfi = int(fid, 16) & 0x1F
+        result['sfi'] = sfi if 1 <= sfi <= 30 else None
     return result
 
 
@@ -1527,6 +1616,8 @@ def _decode_udh(udh):
         iei = udh[i]
         length = udh[i + 1]
         data = udh[i + 2:i + 2 + length]
+        if len(data) < length:
+            break  # truncated UDH
         i += 2 + length
         el = {'iei': f'0x{iei:02X}', 'name': IEI_NAMES.get(iei),
               'length': length, 'hex': data.hex().upper()}
@@ -2501,7 +2592,8 @@ def _decode_spn(raw, p1=None):
 
 
 def _decode_loci(raw, p1=None):
-    if len(raw) < 13:
+    # EF_LOCI (TS 31.102 §4.2.16): TMSI 4 + LAI 5 + TMSI_TIME 1 + update status 1 = 11 bytes.
+    if len(raw) < 11:
         return {'raw': raw.hex().upper()}
     tmsi = raw[0:4]
     lai = raw[4:9]
@@ -2510,7 +2602,8 @@ def _decode_loci(raw, p1=None):
         'tmsi': None if all(b == 0xff for b in tmsi) else tmsi.hex().upper(),
         'mcc': plmn.get('mcc'), 'mnc': plmn.get('mnc'),
         'lac': '0x' + lai[3:5].hex().upper(),
-        'location_update_status': f'0x{raw[12]:02X}',
+        'tmsi_time': f'0x{raw[9]:02X}',
+        'location_update_status': f'0x{raw[10]:02X}',
     }
 
 
@@ -2527,6 +2620,42 @@ def _decode_phase(raw, p1=None):
     return {'phase': _PHASE_NAMES.get(v, f'0x{v:02X}')}
 
 
+def _decode_epsloci(raw, p1=None):
+    # EF_EPSLOCI (TS 31.102 §4.2.91): GUTI 12 + TAI 5 + update status 1 = 18 bytes.
+    if all(b == 0xff for b in raw):
+        return {'empty': True}
+    if len(raw) < 18:
+        return {'raw': raw.hex().upper()}
+    guti = raw[0:12]
+    tai = raw[12:17]
+    plmn = _decode_plmn(tai[:3]) or {}
+    return {
+        'guti': None if all(b == 0xff for b in guti) else guti.hex().upper(),
+        'mcc': plmn.get('mcc'), 'mnc': plmn.get('mnc'),
+        'tac': '0x' + tai[3:5].hex().upper(),
+        'eps_update_status': f'0x{raw[17]:02X}',
+    }
+
+
+def _decode_psloci(raw, p1=None):
+    # EF_PSLOCI (TS 31.102 §4.2.23): P-TMSI 4 + P-TMSI sig 3 + RAI 6 + status 1 = 14 bytes.
+    if all(b == 0xff for b in raw):
+        return {'empty': True}
+    if len(raw) < 14:
+        return {'raw': raw.hex().upper()}
+    ptmsi = raw[0:4]
+    rai = raw[7:13]
+    plmn = _decode_plmn(rai[:3]) or {}
+    return {
+        'p_tmsi': None if all(b == 0xff for b in ptmsi) else ptmsi.hex().upper(),
+        'p_tmsi_signature': raw[4:7].hex().upper(),
+        'mcc': plmn.get('mcc'), 'mnc': plmn.get('mnc'),
+        'lac': '0x' + rai[3:5].hex().upper(),
+        'rac': '0x' + rai[5:6].hex().upper(),
+        'update_status': f'0x{raw[13]:02X}',
+    }
+
+
 def _decode_nai(raw, p1=None):
     """ISIM identity files (EF_IMPI/DOMAIN/IMPU): BER-TLV tag 0x80 + ASCII value."""
     if not raw or all(b == 0xff for b in raw):
@@ -2541,6 +2670,33 @@ def _decode_nai(raw, p1=None):
         return {'text': texts[0] if len(texts) == 1 else ', '.join(texts)}
     txt = raw.rstrip(b'\xff').decode('ascii', 'replace').strip()
     return {'text': txt} if txt else {'raw': raw.hex().upper()}
+
+
+def _decode_epsnsc(raw, p1=None):
+    # EF_EPSNSC (TS 31.102 §4.2.92): record = A0 { 80 KSI_ASME, 81 K_ASME,
+    # 82 UpLink NAS COUNT, 83 DownLink NAS COUNT, 84 NAS algorithms }.
+    if not raw or all(b == 0xff for b in raw):
+        return {'empty': True}
+    inner = raw
+    for tag, _length, value in parse_tlv(raw):
+        if tag == 0xA0:
+            inner = value
+            break
+    out = {}
+    for tag, _length, value in parse_tlv(inner):
+        if tag == 0x80:
+            out['ksi_asme'] = value.hex().upper()
+        elif tag == 0x81:
+            out['k_asme'] = value.hex().upper()
+        elif tag == 0x82:
+            out['uplink_nas_count'] = int.from_bytes(value, 'big')
+        elif tag == 0x83:
+            out['downlink_nas_count'] = int.from_bytes(value, 'big')
+        elif tag == 0x84:
+            out['nas_algorithms'] = value.hex().upper()
+    if not out:
+        return {'raw': raw.hex().upper()}
+    return out
 
 
 def _decode_hex(raw, p1=None):
@@ -2580,6 +2736,9 @@ FILE_DECODERS = {
     '6fb7': _decode_ecc,
     '6f46': _decode_spn,
     '6f7e': _decode_loci,
+    '6f73': _decode_psloci,
+    '6fe3': _decode_epsloci,
+    '6fe4': _decode_epsnsc,
     '6f08': _decode_hex,
     '6f09': _decode_hex,
     '6f3e': _decode_hex,
@@ -2644,6 +2803,8 @@ def _file_summary(f):
         return 'record op on non-record file (selection stale?)'
     if f.get('empty'):
         return 'empty'
+    if f.get('unknown'):
+        return 'unknown file'
     if f.get('imsi'):
         return f"IMSI {f['imsi']}"
     if f.get('iccid'):
@@ -2673,8 +2834,21 @@ def _file_summary(f):
         return f"SMS {s}".strip()
     if f.get('direction'):
         return f"SMS {f['direction']} — {f['status']}"
+    if f.get('guti'):
+        return f"GUTI {f['guti']} · TAC {f.get('tac', '')} · status {f.get('eps_update_status', '')}"
+    if f.get('p_tmsi'):
+        return f"P-TMSI {f['p_tmsi']} · status {f.get('update_status', '')}"
+    if 'ksi_asme' in f:
+        return f"KSI {f['ksi_asme']} · NAS counts {f.get('uplink_nas_count', '?')}/{f.get('downlink_nas_count', '?')}"
     if f.get('mcc'):
-        return f"MCC {f['mcc']} MNC {f['mnc']} · LAC {f.get('lac', '')}"
+        parts = [f"MCC {f['mcc']} MNC {f['mnc']}"]
+        if f.get('lac'):
+            parts.append(f"LAC {f['lac']}")
+        if f.get('tac'):
+            parts.append(f"TAC {f['tac']}")
+        if f.get('rac'):
+            parts.append(f"RAC {f['rac']}")
+        return ' · '.join(parts)
     if f.get('access_classes') is not None:
         return 'classes ' + ', '.join(str(c) for c in f['access_classes'])
     if f.get('phase'):
@@ -2746,7 +2920,9 @@ def _build_summary(result):
                 p1txt = ', '.join(p1['bits'])
         if p2:
             p2txt = p2.get('name')
-            if not p2txt and p2.get('bits'):
+            if p2.get('sfi'):
+                p2txt = f"SFI {p2['sfi']}"
+            elif not p2txt and p2.get('bits'):
                 p2txt = ', '.join(p2['bits'])
 
     body = result.get('body')
@@ -2819,9 +2995,15 @@ def _build_summary(result):
 
     file_dec = result.get('file')
     if file_dec:
-        txt = _file_summary(file_dec)
-        if txt:
-            parts.append(f"{file_dec.get('ef', '')} {txt}".strip())
+        if file_dec.get('unknown'):
+            parts.append('unknown file')
+        else:
+            ef = file_dec.get('ef') or file_dec.get('fid') or ''
+            txt = _file_summary(file_dec)
+            if txt:
+                parts.append(f"{ef} {txt}".strip())
+            elif ef:
+                parts.append(ef)
 
     return ', '.join(parts) if parts else None
 
@@ -2868,6 +3050,11 @@ def decode_message(raw_data, prev=None):
         else:
             result['p1'] = _decode_field(spec.get('p1', {}), p1)
             result['p2'] = _decode_field(spec.get('p2', {}), p2)
+            if ins in (0xB2, 0xDC, 0xA2):
+                # Record commands: P2 b8-b4 = SFI (TS 102 221 §11.1.5/6/7).
+                sfi = p2 >> 3
+                if sfi:
+                    result['p2']['sfi'] = sfi
 
     # Body: at least P3 bytes from byte 5; extra bytes may be SW
     remaining = raw_data[5:]
@@ -2932,8 +3119,43 @@ def decode_message(raw_data, prev=None):
                     result['response'] = fcp
 
         # File data decode for READ/UPDATE using the current selection.
-        if ins in (0xB0, 0xB2, 0xD6, 0xDC) and prev and prev.get('sel'):
-            offset = (result.get('p1p2') or {}).get('offset', 0)
+        p1p2 = result.get('p1p2') or {}
+        rec_sfi = (result.get('p2') or {}).get('sfi')
+        if ins in (0xB0, 0xD6) and prev and 'sfi' in p1p2:
+            # SFI referencing → resolve the target EF, not the last selection.
+            sfi = p1p2['sfi']
+            fid = (prev.get('sfi_map') or {}).get(sfi)
+            if fid:
+                file_dec = _decode_file_data(fid, body, p1=p1)
+                if file_dec:
+                    result['file'] = file_dec
+                else:
+                    result['file'] = {'fid': fid, 'ef': KNOWN_FIDS.get(fid, fid.upper()),
+                                      'raw': body.hex().upper()}
+            else:
+                result['file'] = {'sfi': sfi, 'unknown': True, 'ef': f'SFI {sfi}'}
+        elif ins in (0xB2, 0xDC) and prev and rec_sfi:
+            # Record command with SFI (P2 b8-b4) → resolve the target EF.
+            fid = (prev.get('sfi_map') or {}).get(rec_sfi)
+            if fid:
+                file_dec = _decode_file_data(fid, body, p1=p1)
+                if file_dec:
+                    result['file'] = file_dec
+                else:
+                    result['file'] = {'fid': fid, 'ef': KNOWN_FIDS.get(fid, fid.upper()),
+                                      'raw': body.hex().upper()}
+            else:
+                result['file'] = {'sfi': rec_sfi, 'unknown': True, 'ef': f'SFI {rec_sfi}'}
+        elif ins == 0xA2 and prev and rec_sfi:
+            # SEARCH RECORD with SFI → attach the target file name (the body
+            # is a search pattern, not file data).
+            fid = (prev.get('sfi_map') or {}).get(rec_sfi)
+            if fid:
+                result['file'] = {'fid': fid, 'ef': KNOWN_FIDS.get(fid, fid.upper())}
+            else:
+                result['file'] = {'sfi': rec_sfi, 'unknown': True, 'ef': f'SFI {rec_sfi}'}
+        elif ins in (0xB0, 0xB2, 0xD6, 0xDC) and prev and prev.get('sel'):
+            offset = p1p2.get('offset', 0)
             if ins in (0xB2, 0xDC) or offset == 0:
                 if ins in (0xB2, 0xDC) and not _is_record_file(prev['sel']):
                     result['file'] = _stale_file_note(prev['sel'])

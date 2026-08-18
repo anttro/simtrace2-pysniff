@@ -171,20 +171,18 @@ class Database:
             'SELECT id, session_id, elapsed, type, data, flags FROM messages '
             'WHERE session_id=? ORDER BY elapsed, id LIMIT ? OFFSET ?',
             (session_id, limit, offset)).fetchall()
-        initial_prev = None
+        initial_states = None
         if offset > 0 and rows:
-            initial_prev = self._last_tpdu_context(session_id, rows[0][0]) or {}
-            initial_prev['sel'] = self._last_selection(session_id, rows[0][0])
-        return self._decode_rows(rows, initial_prev=initial_prev)
+            initial_states = self._replay_context(session_id, rows[0][0])
+        return self._decode_rows(rows, initial_states=initial_states)
 
     def get_messages_after(self, session_id, after_id):
         rows = self._conn.execute(
             'SELECT id, session_id, elapsed, type, data, flags FROM messages '
             'WHERE session_id=? AND id > ? ORDER BY elapsed, id',
             (session_id, after_id)).fetchall()
-        initial_prev = self._last_tpdu_context(session_id, after_id + 1) or {}
-        initial_prev['sel'] = self._last_selection(session_id, after_id + 1)
-        return self._decode_rows(rows, initial_prev=initial_prev)
+        initial_states = self._replay_context(session_id, after_id + 1)
+        return self._decode_rows(rows, initial_states=initial_states)
 
     def get_messages_raw(self, session_id):
         rows = self._conn.execute(
@@ -242,41 +240,67 @@ class Database:
                       file=sys.stderr)
         return msg
 
-    def _last_tpdu_context(self, session_id, before_id):
-        """Return previous-command context from the last TPDU with id < before_id."""
-        row = self._conn.execute(
-            "SELECT data FROM messages WHERE session_id=? AND id < ? AND type='tpdu' "
-            "ORDER BY id DESC LIMIT 1", (session_id, before_id)).fetchone()
-        if row is None:
-            return None
+    def _new_channel_state(self):
+        from .decode import sfi_table
+        return {'prev': None, 'sel': None, 'df': '3f00', 'sfi_map': dict(sfi_table('3f00'))}
+
+    def _channel_state(self, states, channel):
+        st = states.get(channel)
+        if st is None:
+            st = self._new_channel_state()
+            states[channel] = st
+        return st
+
+    def _replay_context(self, session_id, before_id):
+        """Replay (bounded) messages before *before_id* to recover per-channel
+        selection, DF, and SFI map."""
         from .decode import decode_sniff_msg
-        d = decode_sniff_msg(row[0], 'tpdu', 0)
-        if not d:
-            return None
-        return self._context_from_decoded(d)
-
-    def _last_selection(self, session_id, before_id):
-        """Replay (bounded, backwards) to find the current selection.
-
-        Scans back from *before_id* to the last file-defining event:
-        an ATR/card-change resets selection; a SELECT sets it.
-        """
-        from .decode import decode_sniff_msg, select_target_fid, KNOWN_FIDS
         rows = self._conn.execute(
             "SELECT data, type FROM messages WHERE session_id=? AND id < ? "
             "AND type IN ('tpdu','atr','change') ORDER BY id DESC LIMIT 500",
             (session_id, before_id)).fetchall()
-        for data, typ in rows:
+        states = {}
+        for data, typ in reversed(rows):
             if typ in ('atr', 'change'):
-                return None
-            d = decode_sniff_msg(data, 'tpdu', 0)
-            if d and d.get('ins_hex') == 'a4':
-                fid = select_target_fid(d)
-                if fid:
-                    return {'fid': fid, 'name': KNOWN_FIDS.get(fid)}
-                if (d.get('p1') or {}).get('raw') in ('03', '04'):
-                    return None
-        return None
+                states = {}
+                continue
+            channel = data[0] & 0x03 if data and len(data) >= 1 else 0
+            st = self._channel_state(states, channel)
+            ctx = dict(st['prev']) if st['prev'] else {}
+            ctx['sel'] = st['sel']
+            ctx['df'] = st['df']
+            ctx['sfi_map'] = st['sfi_map']
+            d = decode_sniff_msg(data, 'tpdu', 0, prev=ctx)
+            if not d or not d.get('ins_hex'):
+                continue
+            st['sel'], st['df'], st['sfi_map'] = self._advance_state(d, st['sel'], st['df'], st['sfi_map'])
+            st['prev'] = self._context_from_decoded(d)
+        return states
+
+    def _advance_state(self, d, sel, df, sfi_map):
+        """Update (sel, df, sfi_map) for one decoded TPDU."""
+        from .decode import selected_df_fid, sfi_table, KNOWN_FIDS
+        new_df = selected_df_fid(d)
+        if new_df is not None and new_df != df:
+            # Only a successful SELECT changes the current DF.
+            if (d.get('sw') or {}).get('sw1') in _SUCCESS_SW1:
+                df = new_df
+                sfi_map = dict(sfi_table(new_df))
+        # Learn SFI from the FCP of the last SELECT (GET RESPONSE).
+        if d.get('ins_hex') == 'c0' and d.get('response_for') == 'SELECT' and sel:
+            sfi = (d.get('response') or {}).get('sfi')
+            if sfi is not None:
+                sfi_map = dict(sfi_map)
+                sfi_map[sfi] = sel['fid']
+        sel = self._selection_after(d, sel)
+        # A record/SEARCH command with a valid SFI sets the file as current EF
+        # (TS 102 221 §11.1.2).
+        sfi = (d.get('p2') or {}).get('sfi')
+        if d.get('ins_hex') in ('b2', 'dc', 'a2') and sfi:
+            fid = sfi_map.get(sfi)
+            if fid:
+                sel = {'fid': fid, 'name': KNOWN_FIDS.get(fid), 'structure': None}
+        return sel, df, sfi_map
 
     def _context_from_decoded(self, d):
         ins_hex = d.get('ins_hex')
@@ -317,20 +341,24 @@ class Database:
                 return new
         return sel
 
-    def _decode_rows(self, rows, initial_prev=None):
+    def _decode_rows(self, rows, initial_states=None):
         msgs = []
-        prev = initial_prev
-        sel = (initial_prev or {}).get('sel')
+        states = dict(initial_states or {})
         for row in rows:
-            ctx = dict(prev) if prev else {}
-            ctx['sel'] = sel
+            channel = 0
+            if row[3] == 'tpdu' and row[4] and len(row[4]) >= 5:
+                channel = row[4][0] & 0x03
+            st = self._channel_state(states, channel)
+            ctx = dict(st['prev']) if st['prev'] else {}
+            ctx['sel'] = st['sel']
+            ctx['df'] = st['df']
+            ctx['sfi_map'] = st['sfi_map']
             msg = self._row_to_message(row, prev=ctx)
             d = msg.get('decoded')
             if msg['type'] == 'tpdu' and d and d.get('ins_hex'):
-                sel = self._selection_after(d, sel)
-                prev = self._context_from_decoded(d)
+                st['sel'], st['df'], st['sfi_map'] = self._advance_state(d, st['sel'], st['df'], st['sfi_map'])
+                st['prev'] = self._context_from_decoded(d)
             elif msg['type'] in ('atr', 'change'):
-                sel = None
-                prev = None
+                states = {}
             msgs.append(msg)
         return msgs

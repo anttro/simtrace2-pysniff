@@ -700,7 +700,9 @@ function fileRows(f) {
     if (!f) return '';
     const title = f.ef ? `${f.ef} (0x${(f.fid || '').toUpperCase()})` : (f.fid || '').toUpperCase();
     const rows = [];
-    if (f.stale) {
+    if (f.unknown) {
+        rows.push(['File', `${f.ef || ('SFI ' + f.sfi)} — unresolved SFI reference`]);
+    } else if (f.stale) {
         rows.push(['File', title + ' — selection stale (record op on non-record file)']);
     } else if (f.empty) {
         rows.push(['File', title + ' — empty']);
@@ -730,9 +732,26 @@ function fileRows(f) {
         if (f.access_classes) rows.push(['Access classes', f.access_classes.join(', ')]);
         if (f.phase) rows.push(['Phase', f.phase]);
         if (f.display_condition) rows.push(['Display condition', f.display_condition]);
-        if (f.mcc) rows.push(['Location', 'MCC ' + f.mcc + ' MNC ' + f.mnc + ' · LAC ' + f.lac]);
+        if (f.mcc) {
+            const parts = ['MCC ' + f.mcc + ' MNC ' + f.mnc];
+            if (f.lac) parts.push('LAC ' + f.lac);
+            if (f.tac) parts.push('TAC ' + f.tac);
+            if (f.rac) parts.push('RAC ' + f.rac);
+            rows.push(['Location', parts.join(' · ')]);
+        }
         if (f.tmsi) rows.push(['TMSI', f.tmsi]);
+        if (f.tmsi_time) rows.push(['TMSI time', f.tmsi_time]);
         if (f.location_update_status) rows.push(['Update status', f.location_update_status]);
+        if (f.guti) rows.push(['GUTI', f.guti]);
+        if (f.eps_update_status) rows.push(['EPS update status', f.eps_update_status]);
+        if (f.p_tmsi) rows.push(['P-TMSI', f.p_tmsi]);
+        if (f.p_tmsi_signature) rows.push(['P-TMSI signature', f.p_tmsi_signature]);
+        if (f.update_status) rows.push(['Update status', f.update_status]);
+        if (f.ksi_asme) rows.push(['KSI (ASME)', f.ksi_asme]);
+        if (f.k_asme) rows.push(['K_ASME', f.k_asme]);
+        if (f.uplink_nas_count !== undefined) rows.push(['UpLink NAS count', f.uplink_nas_count]);
+        if (f.downlink_nas_count !== undefined) rows.push(['DownLink NAS count', f.downlink_nas_count]);
+        if (f.nas_algorithms) rows.push(['NAS algorithms', f.nas_algorithms]);
         if (f.rules) rows.push(['Rules', f.rules.map(r => r.tag + ' ' + r.hex).join(', ')]);
         if (f.raw) rows.push(['Data', f.raw]);
         if (f.tpdu) {
@@ -883,8 +902,11 @@ function showDetail(msg, entry) {
     }
     let p2 = '';
     if (decoded.p2) {
-        const n = decoded.p2.name || (decoded.p2.bits ? decoded.p2.bits.join(', ') : '');
-        p2 = `<tr><td class="label">P2</td><td class="value">0x${(decoded.p2.raw || '').toUpperCase()}${n ? ` — <span class="name">${n}</span>` : ''}</td></tr>`;
+        const parts = [];
+        if (decoded.p2.sfi) parts.push('SFI ' + decoded.p2.sfi);
+        const m = decoded.p2.name || (decoded.p2.bits ? decoded.p2.bits.join(', ') : '');
+        if (m) parts.push(m);
+        p2 = `<tr><td class="label">P2</td><td class="value">0x${(decoded.p2.raw || '').toUpperCase()}${parts.length ? ` — <span class="name">${parts.join(', ')}</span>` : ''}</td></tr>`;
     }
 
     let sw = '';
@@ -1689,7 +1711,7 @@ const LANG_RU = {
     'Click an APDU to see details': 'Нажмите на APDU для просмотра деталей',
     'Command Stats': 'Статистика команд',
     'Stats': 'Статистика',
-    'Map': 'Карта',
+    'Map': 'Обзор',
     'Reads:': 'Чтение:',
     'Writes:': 'Запись:',
     'Read/write:': 'Чтение/запись:',

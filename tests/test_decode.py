@@ -247,6 +247,24 @@ class TestFcpResponse(unittest.TestCase):
         self.assertEqual(fcp['file_size'], 9)
         self.assertEqual(fcp['total_file_size'], 9)
 
+    def test_fcp_sfi(self):
+        # FCP SFI tag 0x88 carries the SFI in bits b8..b4 (value >> 3).
+        from simtrace2_pysniff.server.decode import _decode_fcp
+        fcp = _decode_fcp(bytes.fromhex('8202412183026f7e880158'))
+        self.assertEqual(fcp['sfi'], 11)
+
+    def test_fcp_sfi_empty(self):
+        # FCP SFI tag 0x88 with length 0 → file does not support SFI.
+        from simtrace2_pysniff.server.decode import _decode_fcp
+        fcp = _decode_fcp(bytes.fromhex('82054221005a0d83026f068800'))
+        self.assertIsNone(fcp['sfi'])
+
+    def test_fcp_sfi_absent_uses_fid_lsbs(self):
+        # No SFI tag → SFI = 5 LSBs of the FID (TS 102 221 §11.1.2).
+        from simtrace2_pysniff.server.decode import _decode_fcp
+        fcp = _decode_fcp(bytes.fromhex('8202412183022f06'))
+        self.assertEqual(fcp['sfi'], 0x06)
+
     def test_fcp_summary_transparent(self):
         # GET RESPONSE (FCP) for a transparent EF of 9 bytes
         gr = bytes.fromhex('00c000000c') + bytes.fromhex('620c8202012183026f07800109810109') + bytes.fromhex('9000')
@@ -866,7 +884,7 @@ class TestSummary(unittest.TestCase):
 
     def test_read_record(self):
         r = decode_message(bytes.fromhex('a0b2010400'))
-        self.assertEqual(r['summary'], 'Record number: 1, use record number from P1')
+        self.assertEqual(r['summary'], 'Record number: 1, absolute mode (record number in P1)')
 
     def test_verify_pin_no_leak(self):
         # VERIFY PIN with P2 = 0x01 (PIN Appl 1): the PIN value must not leak.
@@ -1029,6 +1047,46 @@ class TestFileDecoders(unittest.TestCase):
         self.assertEqual(f['tpdu']['da'], '999')
         self.assertEqual(f['tpdu']['text'], 'Hi')
 
+    def test_loci(self):
+        from simtrace2_pysniff.server.decode import _decode_file_data
+        # EF_LOCI (11 bytes): TMSI 4 + LAI 5 + TMSI_TIME 1 + status 1.
+        f = _decode_file_data('6f7e', bytes.fromhex('1e731e5752f09969c50000'))
+        self.assertEqual(f['tmsi'], '1E731E57')
+        self.assertEqual(f['mcc'], '250')
+        self.assertEqual(f['mnc'], '99')
+        self.assertEqual(f['lac'], '0x69C5')
+        self.assertEqual(f['location_update_status'], '0x00')
+
+    def test_epsloci(self):
+        from simtrace2_pysniff.server.decode import _decode_file_data
+        # EF_EPSLOCI (18 bytes): GUTI 12 + TAI 5 + status 1.
+        f = _decode_file_data('6fe3', bytes.fromhex('0bf652f0998001b0fb91192652f0991d9900'))
+        self.assertEqual(f['guti'], '0BF652F0998001B0FB911926')
+        self.assertEqual(f['eps_update_status'], '0x00')
+
+    def test_psloci(self):
+        from simtrace2_pysniff.server.decode import _decode_file_data
+        # EF_PSLOCI (14 bytes): P-TMSI 4 + sig 3 + RAI 6 + status 1.
+        f = _decode_file_data('6f73', bytes.fromhex('1111111122222252f0991d990001'))
+        self.assertEqual(f['p_tmsi'], '11111111')
+        self.assertEqual(f['p_tmsi_signature'], '222222')
+        self.assertEqual(f['mcc'], '250')
+        self.assertEqual(f['mnc'], '99')
+        self.assertEqual(f['lac'], '0x1D99')
+        self.assertEqual(f['rac'], '0x00')
+        self.assertEqual(f['update_status'], '0x01')
+
+    def test_epsnsc(self):
+        from simtrace2_pysniff.server.decode import _decode_file_data
+        # EF_EPSNSC record: A0 { 80 KSI_ASME, 81 K_ASME, 82/83 NAS counts, 84 algos }.
+        f = _decode_file_data('6fe4', bytes.fromhex(
+            'a0188001018104aabbccdd820400000003830400000004840102'))
+        self.assertEqual(f['ksi_asme'], '01')
+        self.assertEqual(f['k_asme'], 'AABBCCDD')
+        self.assertEqual(f['uplink_nas_count'], 3)
+        self.assertEqual(f['downlink_nas_count'], 4)
+        self.assertEqual(f['nas_algorithms'], '02')
+
     def test_read_binary_direct(self):
         # SELECT EF_IMSI then READ BINARY → file decoded in body.
         r = decode_message(bytes.fromhex('00b0000009') +
@@ -1154,6 +1212,130 @@ class TestSelectionTracking(unittest.TestCase):
             msgs = db.get_messages(sid)
             read = msgs[2]
             self.assertTrue(read['decoded']['file']['stale'])
+
+    def test_sfi_update_resolves_eps_loci(self):
+        # SFI referencing must resolve the target EF (EF_EPSLOCI), not the
+        # last-selected file.
+        import tempfile
+        from simtrace2_pysniff.server.database import Database
+        with tempfile.NamedTemporaryFile(suffix='.db') as tmp:
+            db = Database(tmp.name)
+            sid = db.create_session('capture')
+            db.insert_message(sid, 0.0, 'atr', b'\x3b\x00')
+            db.insert_message(sid, 0.1, 'tpdu', bytes.fromhex('00a40804027fff612a'))
+            db.insert_message(sid, 0.2, 'tpdu',
+                              bytes.fromhex('00d69e0012') +
+                              bytes.fromhex('0bf652f0998001b0fb91192652f0991d9900') +
+                              bytes.fromhex('9000'))
+            msgs = db.get_messages(sid)
+            up = msgs[2]
+            self.assertEqual(up['decoded']['file']['ef'], 'EF_EPSLOCI')
+            self.assertEqual(up['decoded']['file']['guti'], '0BF652F0998001B0FB911926')
+
+    def test_sfi_unknown_not_misattributed(self):
+        # An SFI not in the map must not fall back to the selected file.
+        import tempfile
+        from simtrace2_pysniff.server.database import Database
+        with tempfile.NamedTemporaryFile(suffix='.db') as tmp:
+            db = Database(tmp.name)
+            sid = db.create_session('capture')
+            db.insert_message(sid, 0.0, 'tpdu', bytes.fromhex('00a40804022fe2611e'))
+            db.insert_message(sid, 0.1, 'tpdu', bytes.fromhex('00d6890001079000'))
+            msgs = db.get_messages(sid)
+            up = msgs[1]
+            self.assertTrue(up['decoded']['file']['unknown'])
+            self.assertEqual(up['decoded']['file']['sfi'], 9)
+
+    def test_record_sfi_sets_current_ef(self):
+        # A record command with a valid SFI sets that file as the current EF,
+        # so a subsequent non-SFI record op targets it (TS 102 221 §11.1.2).
+        import tempfile
+        from simtrace2_pysniff.server.database import Database
+        with tempfile.NamedTemporaryFile(suffix='.db') as tmp:
+            db = Database(tmp.name)
+            sid = db.create_session('capture')
+            db.insert_message(sid, 0.0, 'atr', b'\x3b\x00')
+            db.insert_message(sid, 0.1, 'tpdu', bytes.fromhex('00a40804047fff6f7e611e'))
+            db.insert_message(sid, 0.2, 'tpdu', bytes.fromhex('00dc01c436') +
+                              bytes.fromhex('a0348001018104aabbccdd820400000003830400000004840102') +
+                              bytes.fromhex('9000'))
+            db.insert_message(sid, 0.3, 'tpdu', bytes.fromhex('00dc010436') +
+                              bytes.fromhex('a0348001078104aabbccdd820400000004830400000003840102') +
+                              bytes.fromhex('9000'))
+            msgs = db.get_messages(sid)
+            self.assertEqual(msgs[2]['decoded']['file']['ef'], 'EF_EPSNSC')
+            # 0.3 has P2=04 (no SFI) → must still target EF_EPSNSC.
+            self.assertEqual(msgs[3]['decoded']['file']['ef'], 'EF_EPSNSC')
+
+    def test_channel_selection_not_clobbered(self):
+        # A SELECT on channel 1 (CLA 01) must not change channel 0's selection.
+        import tempfile
+        from simtrace2_pysniff.server.database import Database
+        with tempfile.NamedTemporaryFile(suffix='.db') as tmp:
+            db = Database(tmp.name)
+            sid = db.create_session('capture')
+            db.insert_message(sid, 0.0, 'tpdu', bytes.fromhex('00a40804047fff6f409000'))
+            db.insert_message(sid, 0.1, 'tpdu', bytes.fromhex('01a40804047fff6f02611e'))
+            db.insert_message(sid, 0.2, 'tpdu',
+                              bytes.fromhex('00b2010427') +
+                              bytes.fromhex('8109089cbeb920bdbebcb5c0ffffffffffffffffffffffffff07919752738981f7ffffffffffff') +
+                              bytes.fromhex('9000'))
+            msgs = db.get_messages(sid)
+            up = msgs[2]
+            # channel 0 still selects EF_MSISDN, not channel 1's EF_IMPI.
+            self.assertEqual(up['decoded']['file']['ef'], 'EF_MSISDN')
+
+
+class TestSfiResolution(unittest.TestCase):
+    def test_sfi_resolved(self):
+        r = decode_message(
+            bytes.fromhex('00d69e00120bf652f0998001b0fb91192652f0991d99009000'),
+            prev={'sfi_map': {30: '6fe3'}})
+        self.assertEqual(r['file']['ef'], 'EF_EPSLOCI')
+        self.assertEqual(r['file']['guti'], '0BF652F0998001B0FB911926')
+
+    def test_sfi_unknown(self):
+        r = decode_message(bytes.fromhex('00d6880001079000'), prev={'sfi_map': {}})
+        self.assertTrue(r['file']['unknown'])
+        self.assertEqual(r['file']['sfi'], 8)
+
+    def test_sfi_read_resolves(self):
+        # READ BINARY via SFI needs no prev['sel']; only the SFI map.
+        r = decode_message(bytes.fromhex('00b08b000b') +
+                           bytes.fromhex('1e731e5752f09969c50000') + bytes.fromhex('9000'),
+                           prev={'sfi_map': {11: '6f7e'}})
+        self.assertEqual(r['file']['ef'], 'EF_LOCI')
+        self.assertEqual(r['file']['tmsi'], '1E731E57')
+
+    def test_selected_df_fid(self):
+        from simtrace2_pysniff.server.decode import selected_df_fid, sfi_table
+        self.assertEqual(selected_df_fid({'ins_hex': 'a4', 'p1': {'raw': '08'},
+                                          'body': {'hex': '3f007fff'}}), '7fff')
+        self.assertEqual(selected_df_fid({'ins_hex': 'a4', 'p1': {'raw': '00'},
+                                          'body': {'hex': '7f20'}}), '7f20')
+        self.assertIsNone(selected_df_fid({'ins_hex': 'a4', 'p1': {'raw': '00'},
+                                           'body': {'hex': '6f7e'}}))
+        self.assertIsNone(selected_df_fid({'ins_hex': 'b0'}))
+        self.assertEqual(sfi_table('7fff')[0x1e], '6fe3')
+        self.assertEqual(sfi_table('3f00')[0x1e], '2f00')
+        self.assertEqual(sfi_table('7fff')[0x17], '6f06')
+        self.assertEqual(sfi_table('7fff')[0x1a], '6fc6')
+        self.assertEqual(sfi_table('6f7e'), {})
+
+    def test_record_p2_sfi(self):
+        # READ RECORD P2 = 0xBC → SFI = 0xBC>>3 = 23, mode = 0x04.
+        r = decode_message(bytes.fromhex('00b204bc00'), prev={})
+        self.assertEqual(r['p2']['sfi'], 23)
+        self.assertIn('absolute mode', r['p2']['bits'][0])
+
+    def test_update_record_sfi_resolves(self):
+        # UPDATE RECORD P2 = 0xC4 → SFI 24 = EF_EPSNSC (record 54 B).
+        raw = bytes.fromhex('00dc01c436') + bytes.fromhex(
+            'a0348001078120ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff'
+            '8204ffffffff8304ffffffff840100') + bytes.fromhex('9000')
+        r = decode_message(raw, prev={'sfi_map': {24: '6fe4'}})
+        self.assertEqual(r['file']['ef'], 'EF_EPSNSC')
+        self.assertEqual(r['file']['ksi_asme'], '07')
 
 
 class TestP1P2(unittest.TestCase):
