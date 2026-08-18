@@ -961,8 +961,15 @@ class TestSelectPath(unittest.TestCase):
 class TestFileDecoders(unittest.TestCase):
     def test_imsi(self):
         from simtrace2_pysniff.server.decode import _decode_file_data
-        f = _decode_file_data('6f07', bytes.fromhex('0f52001132547698f0'))
+        f = _decode_file_data('6f07', bytes.fromhex('082905102143658709'))
         self.assertEqual(f['imsi'], '250011234567890')
+
+    def test_imsi_real_card(self):
+        # Real capture (Mi A1): 08 length byte + 8 bytes, first nibble is the
+        # TS 24.008 type+parity indicator (9 = IMSI, odd).
+        from simtrace2_pysniff.server.decode import _decode_file_data
+        f = _decode_file_data('6f07', bytes.fromhex('082905917700917259'))
+        self.assertEqual(f['imsi'], '250197700192795')
 
     def test_iccid(self):
         from simtrace2_pysniff.server.decode import _decode_file_data
@@ -1090,14 +1097,14 @@ class TestFileDecoders(unittest.TestCase):
     def test_read_binary_direct(self):
         # SELECT EF_IMSI then READ BINARY → file decoded in body.
         r = decode_message(bytes.fromhex('00b0000009') +
-                           bytes.fromhex('0f52001132547698f0') + bytes.fromhex('9000'),
+                           bytes.fromhex('082905102143658709') + bytes.fromhex('9000'),
                            prev={'sel': {'fid': '6f07', 'name': 'EF_IMSI'}})
         self.assertEqual(r['file']['imsi'], '250011234567890')
         self.assertIn('IMSI 250011234567890', r['summary'])
 
     def test_read_binary_offset_skip(self):
         r = decode_message(bytes.fromhex('00b00100') +
-                           bytes.fromhex('0f52001132547698f0') + bytes.fromhex('9000'),
+                           bytes.fromhex('082905102143658709') + bytes.fromhex('9000'),
                            prev={'sel': {'fid': '6f07'}})
         self.assertNotIn('file', r)
 
@@ -1163,7 +1170,7 @@ class TestSelectionTracking(unittest.TestCase):
             db.insert_message(sid, 0.0, 'atr', b'\x3b\x00')
             db.insert_message(sid, 0.1, 'tpdu', bytes.fromhex('a0a40804047fff6f079000'))
             db.insert_message(sid, 0.2, 'tpdu',
-                              bytes.fromhex('00b0000009') + bytes.fromhex('0f52001132547698f0') + bytes.fromhex('9000'))
+                              bytes.fromhex('00b0000009') + bytes.fromhex('082905102143658709') + bytes.fromhex('9000'))
             msgs = db.get_messages(sid)
             read = msgs[2]
             self.assertEqual(read['decoded']['file']['imsi'], '250011234567890')
@@ -1177,7 +1184,7 @@ class TestSelectionTracking(unittest.TestCase):
             db.insert_message(sid, 0.0, 'tpdu', bytes.fromhex('a0a40804047fff6f079000'))
             db.insert_message(sid, 0.1, 'atr', b'\x3b\x00')
             db.insert_message(sid, 0.2, 'tpdu',
-                              bytes.fromhex('00b0000009') + bytes.fromhex('0f52001132547698f0') + bytes.fromhex('9000'))
+                              bytes.fromhex('00b0000009') + bytes.fromhex('082905102143658709') + bytes.fromhex('9000'))
             msgs = db.get_messages(sid)
             self.assertNotIn('file', msgs[2]['decoded'])
 
@@ -1191,7 +1198,7 @@ class TestSelectionTracking(unittest.TestCase):
             db.insert_message(sid, 0.0, 'tpdu', bytes.fromhex('a0a40804047fff6f079000'))
             db.insert_message(sid, 0.1, 'tpdu', bytes.fromhex('a0a40804047fff6f136a82'))
             db.insert_message(sid, 0.2, 'tpdu',
-                              bytes.fromhex('00b0000009') + bytes.fromhex('0f52001132547698f0') + bytes.fromhex('9000'))
+                              bytes.fromhex('00b0000009') + bytes.fromhex('082905102143658709') + bytes.fromhex('9000'))
             msgs = db.get_messages(sid)
             read = msgs[2]
             self.assertEqual(read['decoded']['file']['imsi'], '250011234567890')

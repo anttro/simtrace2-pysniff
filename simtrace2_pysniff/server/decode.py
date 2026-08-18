@@ -2325,6 +2325,10 @@ def _decode_imsi(raw, p1=None):
     if len(raw) <= 2:  # 6F07 is also the ISIM Service Table (IST)
         return _decode_service_table(raw, IST_SERVICES)
     digits = _swap_nibbles(raw[1:].hex()).rstrip('fF')
+    # First nibble is the mobile-identity type (001) + parity indicator
+    # (TS 24.008), not an IMSI digit.
+    if digits:
+        digits = digits[1:]
     return {'imsi': digits or None}
 
 
