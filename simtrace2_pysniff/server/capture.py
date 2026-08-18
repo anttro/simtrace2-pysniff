@@ -46,10 +46,14 @@ class DirectSniffer:
         self._session.close()
 
     def iter_messages(self):
-        for msg in self._session.iter_messages():
-            if not self._running:
-                break
-            yield msg.type, msg.data, msg.flags
+        from ..device import DeviceDisconnected
+        try:
+            for msg in self._session.iter_messages():
+                if not self._running:
+                    break
+                yield msg.type, msg.data, msg.flags
+        except DeviceDisconnected:
+            return
 
 
 class CaptureManager:

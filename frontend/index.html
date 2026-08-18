@@ -525,6 +525,7 @@ function $on(id, ev, fn) { el(id).addEventListener(ev, fn); }
 function responseRows(resp) {
     if (!resp) return '';
     const rows = [];
+    if (resp.qualifier) rows.push(['Qualifier', resp.qualifier]);
     const fd = resp.file_descriptor;
     if (fd) {
         rows.push(['File type', fd.file_type]);
@@ -610,7 +611,7 @@ function cmdRows(cmd) {
     }
 
     // Proactive command fields (FETCH)
-    if (cmd.refresh_mode) rows.push(['Refresh mode', cmd.refresh_mode]);
+    if (cmd.qualifier) rows.push(['Qualifier', cmd.qualifier]);
     if (cmd.file_list) rows.push(['File list', cmd.file_list.join(', ')]);
     if (cmd.aid) rows.push(['AID', cmd.aid]);
     if (cmd.title) rows.push(['Title', cmd.title]);
@@ -867,6 +868,10 @@ function showDetail(msg, entry) {
     if (decoded.p1p2) {
         if (decoded.p1p2.unused) {
             p1p2 = `<tr><td class="label">P1, P2</td><td class="value">0x${hx(decoded.p1p2.value, 4)} (RFU)</td></tr>`;
+        } else if (decoded.p1p2.sfi !== undefined) {
+            p1p2 = `<tr><td class="label">P1-P2</td><td class="value">0x${hx(decoded.p1p2.value, 4)} — SFI ${decoded.p1p2.sfi}, offset ${decoded.p1p2.offset}</td></tr>`;
+        } else if (decoded.p1p2.offset !== undefined) {
+            p1p2 = `<tr><td class="label">P1-P2</td><td class="value">0x${hx(decoded.p1p2.value, 4)} — Offset: ${decoded.p1p2.offset}</td></tr>`;
         } else {
             p1p2 = `<tr><td class="label">P1-P2</td><td class="value">0x${hx(decoded.p1p2.value, 4)} — ${decoded.p1p2.label}: ${decoded.p1p2.value}</td></tr>`;
         }

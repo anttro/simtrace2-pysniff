@@ -867,22 +867,37 @@ PLI_QUALIFIERS = {
 }
 
 
-def _command_details_name(value):
-    """Decode a Command Details TLV value (number, type, qualifier).
+# TS 102 223 §8.6 — Command Qualifier tables per Type of Command.
+# Only commands with a known qualifier coding are listed; others fall back
+# to a raw '0xXX' in _command_qualifier.
+COMMAND_QUALIFIERS = {
+    0x01: REFRESH_MODES,   # REFRESH
+    0x26: PLI_QUALIFIERS,  # PROVIDE LOCAL INFORMATION
+}
 
-    Returns the command type name, with the PLI qualifier description
-    appended for PROVIDE LOCAL INFORMATION (type 0x26).
+
+def _command_qualifier(cmd_type, qualifier):
+    """Decode a Command Qualifier (Command Details byte 3) into a string.
+
+    Returns None when no meaningful qualifier is present, a decoded name
+    when a table exists (including a table's own '00' entry), or a raw
+    '0xXX' for a non-zero qualifier without a table.
     """
+    if qualifier is None:
+        return None
+    table = COMMAND_QUALIFIERS.get(cmd_type)
+    if table:
+        return table.get(qualifier, f'0x{qualifier:02X}')
+    if qualifier == 0x00:
+        return None
+    return f'0x{qualifier:02X}'
+
+
+def _command_details_name(value):
+    """Decode a Command Details TLV value into the command type name."""
     if len(value) < 2:
         return None
-    name = CAT_COMMAND_TYPES.get(value[1])
-    if not name:
-        return None
-    if value[1] == 0x26 and len(value) >= 3:  # PROVIDE LOCAL INFORMATION
-        q = PLI_QUALIFIERS.get(value[2])
-        if q:
-            name = f'{name} — {q}'
-    return name
+    return CAT_COMMAND_TYPES.get(value[1])
 
 
 def decode_cat(ins, body):
@@ -917,6 +932,16 @@ def decode_tr_command(body):
     for tag, _length, value in parse_tlv(body):
         if tag == 0x81:
             return _command_details_name(value)
+    return None
+
+
+def decode_tr_qualifier(body):
+    """Extract the Command Qualifier echoed in a TERMINAL RESPONSE body."""
+    if not body:
+        return None
+    for tag, _length, value in parse_tlv(body):
+        if tag == 0x81 and len(value) >= 3:
+            return _command_qualifier(value[1], value[2])
     return None
 
 
@@ -2069,8 +2094,9 @@ def _decode_proactive(body):
     if cmd_type is None:
         return None
     result['type'] = CAT_COMMAND_TYPES.get(cmd_type, f'0x{cmd_type:02X}')
-    if cmd_type == 0x01 and qualifier is not None:  # REFRESH
-        result['refresh_mode'] = REFRESH_MODES.get(qualifier, f'0x{qualifier:02X}')
+    qualifier_desc = _command_qualifier(cmd_type, qualifier)
+    if qualifier_desc:
+        result['qualifier'] = qualifier_desc
     if file_list:
         result['file_list'] = file_list
     if aid:
@@ -2701,8 +2727,16 @@ def _build_summary(result):
     p1 = result.get('p1')
     p2 = result.get('p2')
     p1txt = p2txt = None
-    if 'p1p2' in result and not result['p1p2'].get('unused'):
-        p1txt = f"{result['p1p2']['label']}: 0x{result['p1p2']['value']:04X}"
+    p1p2 = result.get('p1p2')
+    if p1p2 and not p1p2.get('unused'):
+        if 'sfi' in p1p2:
+            p1txt = f"SFI {p1p2['sfi']}"
+            if p1p2.get('offset'):
+                p1txt += f", offset {p1p2['offset']}"
+        elif 'offset' in p1p2:
+            p1txt = f"Offset: 0x{p1p2['offset']:04X}"
+        else:
+            p1txt = f"{p1p2['label']}: 0x{p1p2['value']:04X}"
     else:
         if p1:
             p1txt = p1.get('name')
@@ -2738,8 +2772,8 @@ def _build_summary(result):
     if cmd:
         if cmd.get('context'):
             parts.append(cmd['context'])
-        if cmd.get('refresh_mode'):
-            parts.append(cmd['refresh_mode'])
+        if cmd.get('qualifier'):
+            parts.append(cmd['qualifier'])
         if cmd.get('title'):
             parts.append(cmd['title'])
         items = cmd.get('items')
@@ -2770,6 +2804,9 @@ def _build_summary(result):
 
     if result.get('response_to'):
         parts.append('\u2192 ' + result['response_to'])
+    response = result.get('response')
+    if response and response.get('qualifier'):
+        parts.append(response['qualifier'])
     if result.get('response_for'):
         response = result.get('response') or {}
         fd = response.get('file_descriptor')
@@ -2777,7 +2814,6 @@ def _build_summary(result):
             parts.append(_fcp_summary(result['response_for'], fd, response))
         else:
             parts.append('response for ' + result['response_for'])
-    response = result.get('response')
     if response and response.get('name'):
         parts.append(response['name'])
 
@@ -2820,7 +2856,9 @@ def decode_message(raw_data, prev=None):
     }
 
     # P1 / P2 decode
-    if spec:
+    if ins in (0xB0, 0xD6):  # READ/UPDATE BINARY → SFI/offset P1-P2
+        result['p1p2'] = _decode_binary_offset(p1, p2)
+    elif spec:
         if 'p1p2' in spec:
             offset = (p1 << 8) | p2
             if spec['p1p2'].get('unused'):
@@ -2873,7 +2911,11 @@ def decode_message(raw_data, prev=None):
             response_to = decode_tr_command(body)
             if response_to:
                 result['response_to'] = response_to
-            result['response'] = _decode_tr_result(body)
+            response = _decode_tr_result(body) or {}
+            tr_qualifier = decode_tr_qualifier(body)
+            if tr_qualifier:
+                response['qualifier'] = tr_qualifier
+            result['response'] = response or None
         else:
             cat_command = decode_cat(ins, body)
             if cat_command:
@@ -2891,7 +2933,7 @@ def decode_message(raw_data, prev=None):
 
         # File data decode for READ/UPDATE using the current selection.
         if ins in (0xB0, 0xB2, 0xD6, 0xDC) and prev and prev.get('sel'):
-            offset = (result.get('p1p2') or {}).get('value', 0)
+            offset = (result.get('p1p2') or {}).get('offset', 0)
             if ins in (0xB2, 0xDC) or offset == 0:
                 if ins in (0xB2, 0xDC) and not _is_record_file(prev['sel']):
                     result['file'] = _stale_file_note(prev['sel'])
@@ -3217,6 +3259,18 @@ def decode_sniff_msg(raw_data, msg_type, flags=0, prev=None):
     if msg_type == 'pps':
         return _decode_pps(raw_data)
     return None
+
+
+def _decode_binary_offset(p1, p2):
+    """Decode READ/UPDATE BINARY P1/P2 (TS 102 221 §11.1.3.2 Table 11.10).
+
+    b8 of P1 = 0 → offset = b7..b1 of P1 << 8 | P2.
+    b8 of P1 = 1 → SFI referencing: b5..b1 of P1 = SFI, P2 = offset.
+    """
+    raw = (p1 << 8) | p2
+    if p1 & 0x80:
+        return {'value': raw, 'sfi': p1 & 0x1F, 'offset': p2}
+    return {'value': raw, 'offset': ((p1 & 0x7F) << 8) | p2}
 
 
 def _decode_field(spec, value):

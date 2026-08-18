@@ -71,8 +71,9 @@ class TestCatDecoding(unittest.TestCase):
     def test_fetch_provide_local_info(self):
         r = decode_message(bytes.fromhex(
             '801200000BD0098103012600820281829000'))
-        self.assertEqual(r['cat_command'],
-                         'PROVIDE LOCAL INFORMATION — Location Info (MCC, MNC, LAC/TAC, Cell ID)')
+        self.assertEqual(r['cat_command'], 'PROVIDE LOCAL INFORMATION')
+        self.assertEqual(r['cmd']['qualifier'],
+                         'Location Info (MCC, MNC, LAC/TAC, Cell ID)')
 
     def test_envelope_event_download(self):
         r = decode_message(bytes.fromhex(
@@ -171,19 +172,21 @@ class TestPliQualifier(unittest.TestCase):
     def test_tr_pli_imei(self):
         r = decode_message(bytes.fromhex(
             '8014000016810301260102028281030106130952F0991EC57A68009F'))
-        self.assertEqual(r['response_to'], 'PROVIDE LOCAL INFORMATION — IMEI')
+        self.assertEqual(r['response_to'], 'PROVIDE LOCAL INFORMATION')
+        self.assertEqual(r['response']['qualifier'], 'IMEI')
 
     def test_fetch_pli_location(self):
         r = decode_message(bytes.fromhex(
             '801200000BD0098103012600820281829000'))
-        self.assertEqual(r['cat_command'],
-                         'PROVIDE LOCAL INFORMATION — Location Info (MCC, MNC, LAC/TAC, Cell ID)')
+        self.assertEqual(r['cat_command'], 'PROVIDE LOCAL INFORMATION')
+        self.assertEqual(r['cmd']['qualifier'],
+                         'Location Info (MCC, MNC, LAC/TAC, Cell ID)')
 
     def test_fetch_pli_date_time(self):
         r = decode_message(bytes.fromhex(
             '801200000BD0098103012603820281829000'))
-        self.assertEqual(r['cat_command'],
-                         'PROVIDE LOCAL INFORMATION — Date, time and time zone')
+        self.assertEqual(r['cat_command'], 'PROVIDE LOCAL INFORMATION')
+        self.assertEqual(r['cmd']['qualifier'], 'Date, time and time zone')
 
     def test_non_pli_no_qualifier(self):
         r = decode_message(bytes.fromhex(
@@ -1040,6 +1043,27 @@ class TestFileDecoders(unittest.TestCase):
                            prev={'sel': {'fid': '6f07'}})
         self.assertNotIn('file', r)
 
+    def test_read_binary_offset_form(self):
+        # b8 of P1 = 0 → offset = b7..b1 << 8 | P2.
+        r = decode_message(bytes.fromhex('00b0010000'), prev=None)
+        self.assertEqual(r['p1p2'], {'value': 0x0100, 'offset': 256})
+        self.assertIn('Offset: 0x0100', r['summary'])
+
+    def test_read_binary_sfi_form(self):
+        # b8 of P1 = 1 → SFI referencing: SFI = b5..b1, P2 = offset.
+        r = decode_message(bytes.fromhex('00d68b000b') +
+                           bytes.fromhex('0000000000000000000000') + bytes.fromhex('9000'),
+                           prev=None)
+        self.assertEqual(r['p1p2'], {'value': 0x8B00, 'sfi': 11, 'offset': 0})
+        self.assertIn('SFI 11', r['summary'])
+        self.assertNotIn('offset 0', r['summary'])
+
+    def test_read_binary_sfi_offset(self):
+        # SFI referencing with a non-zero offset (P2 = 5).
+        r = decode_message(bytes.fromhex('00b08b0500'), prev=None)
+        self.assertEqual(r['p1p2'], {'value': 0x8B05, 'sfi': 11, 'offset': 5})
+        self.assertIn('SFI 11, offset 5', r['summary'])
+
     def test_read_via_get_response(self):
         iccid = bytes.fromhex('98891020000000460012')
         gr = bytes.fromhex('00c00000') + bytes([len(iccid)]) + iccid + bytes.fromhex('9000')
@@ -1239,13 +1263,13 @@ class TestRefresh(unittest.TestCase):
     def test_uicc_reset(self):
         r = decode_message(bytes.fromhex('801200000bd0098103010104820281829000'))
         self.assertEqual(r['cat_command'], 'REFRESH')
-        self.assertEqual(r['cmd']['refresh_mode'], 'UICC Reset')
+        self.assertEqual(r['cmd']['qualifier'], 'UICC Reset')
         self.assertNotIn('file_list', r['cmd'])
         self.assertNotIn('aid', r['cmd'])
 
     def test_file_change_notification(self):
         r = decode_message(bytes.fromhex('8012000011d00f81030101018202818292046f076f209000'))
-        self.assertEqual(r['cmd']['refresh_mode'], 'File Change Notification')
+        self.assertEqual(r['cmd']['qualifier'], 'File Change Notification')
         self.assertEqual(r['cmd']['file_list'], ['6F07', '6F20'])
 
 

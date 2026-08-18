@@ -22,6 +22,13 @@ class _FakeBackend:
         yield from self._messages
 
 
+class _DisconnectingSession:
+    def iter_messages(self):
+        from simtrace2_pysniff.device import DeviceDisconnected
+        raise DeviceDisconnected('disconnected')
+        yield
+
+
 class TestCaptureManager(unittest.TestCase):
     def _manager(self, backend):
         tmp = tempfile.NamedTemporaryFile(suffix='.db', delete=False)
@@ -43,6 +50,12 @@ class TestCaptureManager(unittest.TestCase):
         self.assertEqual(mgr.stop_session(), sid)
         self.assertIsNotNone(db.get_session(sid))
         self.assertEqual(db.count_messages(sid), 1)
+
+    def test_direct_sniffer_device_disconnect(self):
+        from simtrace2_pysniff.server.capture import DirectSniffer
+        sn = DirectSniffer()
+        sn._session = _DisconnectingSession()
+        self.assertEqual(list(sn.iter_messages()), [])
 
 
 if __name__ == '__main__':
