@@ -1019,6 +1019,10 @@ class TestFileDecoders(unittest.TestCase):
             '730ea00c80011781025f408203454150ffffffffffffffffffffffffffffffffffffff'))
         self.assertEqual(f['applications'][0]['label'], 'MegaFon')
         self.assertEqual(f['applications'][0]['aid'], 'A0000000871002FFFFF00189000001FF')
+        eap = f['applications'][0]['eap']
+        self.assertEqual(eap['eap_types'], ['EAP-AKA'])
+        self.assertEqual(eap['dfs'], ['5f40'])
+        self.assertEqual(eap['label'], 'EAP')
 
     def test_nai_empty_record(self):
         from simtrace2_pysniff.server.decode import _decode_file_data

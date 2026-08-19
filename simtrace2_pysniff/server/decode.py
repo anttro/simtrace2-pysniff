@@ -2505,7 +2505,8 @@ def _decode_plmn_act(u16):
 
 
 def _decode_dir(raw, p1=None):
-    """EF_DIR record: application template(s) — AID (4F) + label (50)."""
+    """EF_DIR record: application template(s) — AID (4F) + label (50)
+    + optional EAP discretionary template (73, TS 102 310)."""
     apps = []
     for tag, _length, value in parse_tlv(raw):
         if tag != 0x61:
@@ -2518,9 +2519,38 @@ def _decode_dir(raw, p1=None):
                 label = _decode_annex_a(v2)
                 if label:
                     app['label'] = label
+            elif t2 == 0x73:
+                eap = _decode_eap_template(v2)
+                if eap:
+                    app['eap'] = eap
         if app:
             apps.append(app)
     return {'applications': apps} if apps else {'raw': raw.hex().upper()}
+
+
+# IANA EAP method types seen in TS 102 310 EF_DIR entries.
+_EAP_TYPES = {
+    18: 'EAP-SIM',
+    23: 'EAP-AKA',
+    50: 'EAP-AKA\'',
+}
+
+
+def _decode_eap_template(value):
+    """TS 102 310 §5.2: 73 → A0 { 80 EAP types, 81 DF FIDs, 82 label }."""
+    for t2, _l2, v2 in parse_tlv(value):
+        if t2 != 0xA0:
+            continue
+        eap = {}
+        for t3, _l3, v3 in parse_tlv(v2):
+            if t3 == 0x80:
+                eap['eap_types'] = [_EAP_TYPES.get(b, b) for b in v3]
+            elif t3 == 0x81:
+                eap['dfs'] = [v3[i:i + 2].hex() for i in range(0, len(v3), 2)]
+            elif t3 == 0x82:
+                eap['label'] = v3.decode('ascii', 'replace')
+        return eap
+    return {}
 
 
 def _decode_arr(raw, p1=None):
@@ -2829,7 +2859,16 @@ def _file_summary(f):
     if f.get('services'):
         return f"{len(f['services'])} services allocated"
     if f.get('applications'):
-        return '; '.join((a.get('label') or a.get('aid') or '') for a in f['applications'])
+        parts = []
+        for a in f['applications']:
+            s = a.get('label') or a.get('aid') or ''
+            eap = a.get('eap')
+            if eap:
+                types = ', '.join(str(t) for t in eap.get('eap_types', []))
+                dfs = ', '.join(KNOWN_FIDS.get(d, d) for d in eap.get('dfs', []))
+                s += f" [{eap.get('label', 'EAP')}: {types} in {dfs}]"
+            parts.append(s)
+        return '; '.join(parts)
     if f.get('tpdu'):
         t = f['tpdu']
         s = t.get('mti', '')

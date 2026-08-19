@@ -723,7 +723,14 @@ function fileRows(f) {
             for (const s of f.services) rows.push(['Service ' + s.n, s.name || '']);
         }
         if (f.applications) {
-            for (const a of f.applications) rows.push(['App', (a.label ? a.label + ' · ' : '') + (a.aid || '')]);
+            for (const a of f.applications) {
+                rows.push(['App', (a.label ? a.label + ' · ' : '') + (a.aid || '')]);
+                if (a.eap) {
+                    const types = (a.eap.eap_types || []).join(', ');
+                    const dfs = (a.eap.dfs || []).map(d => d.toUpperCase()).join(', ');
+                    rows.push(['EAP', `${a.eap.label || 'EAP'} (${types}) in ${dfs}`]);
+                }
+            }
         }
         if (f.direction) rows.push(['SMS', f.direction + ' — ' + f.status]);
         if (f.message_ids) rows.push(['Message IDs', f.message_ids.join(', ')]);
