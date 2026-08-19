@@ -149,6 +149,19 @@ class TestChangeAndFidiDecoding(unittest.TestCase):
         self.assertEqual(r['fi_val'], 512)
         self.assertEqual(r['di_val'], 64)
 
+    def test_tpdu_error_flags_surfaced(self):
+        r = decode_sniff_msg(bytes.fromhex('00a40000023f009000'), 'tpdu',
+                             flags=(1 << 7) | (1 << 6))
+        self.assertEqual(r['errors'], ['malformed', 'checksum error'])
+
+    def test_tpdu_no_error_flags(self):
+        r = decode_sniff_msg(bytes.fromhex('00a40000023f009000'), 'tpdu', flags=0)
+        self.assertNotIn('errors', r)
+
+    def test_atr_error_flags_surfaced(self):
+        r = decode_sniff_msg(bytes.fromhex('3b00'), 'atr', flags=(1 << 5))
+        self.assertEqual(r['errors'], ['incomplete'])
+
 
 class TestTerminalResponse(unittest.TestCase):
     def test_tr_setup_event_list(self):
@@ -1187,6 +1200,49 @@ class TestSelectionTracking(unittest.TestCase):
             sid = db.create_session('capture')
             db.insert_message(sid, 0.0, 'tpdu', bytes.fromhex('a0a40804047fff6f079000'))
             db.insert_message(sid, 0.1, 'atr', b'\x3b\x00')
+            db.insert_message(sid, 0.2, 'tpdu',
+                              bytes.fromhex('00b0000009') + bytes.fromhex('082905102143658709') + bytes.fromhex('9000'))
+            msgs = db.get_messages(sid)
+            self.assertNotIn('file', msgs[2]['decoded'])
+
+    def test_timeout_wt_keeps_selection(self):
+        # A waiting-time timeout interrupts one TPDU but the card stays
+        # selected, so the selection must not be reset.
+        import tempfile
+        from simtrace2_pysniff.server.database import Database
+        with tempfile.NamedTemporaryFile(suffix='.db') as tmp:
+            db = Database(tmp.name)
+            sid = db.create_session('capture')
+            db.insert_message(sid, 0.0, 'tpdu', bytes.fromhex('a0a40804047fff6f079000'))
+            db.insert_message(sid, 0.1, 'change', b'', 1 << 4)  # TIMEOUT_WT
+            db.insert_message(sid, 0.2, 'tpdu',
+                              bytes.fromhex('00b0000009') + bytes.fromhex('082905102143658709') + bytes.fromhex('9000'))
+            msgs = db.get_messages(sid)
+            self.assertEqual(msgs[2]['decoded']['file']['imsi'], '250011234567890')
+
+    def test_reset_assert_resets_selection(self):
+        import tempfile
+        from simtrace2_pysniff.server.database import Database
+        with tempfile.NamedTemporaryFile(suffix='.db') as tmp:
+            db = Database(tmp.name)
+            sid = db.create_session('capture')
+            db.insert_message(sid, 0.0, 'tpdu', bytes.fromhex('a0a40804047fff6f079000'))
+            db.insert_message(sid, 0.1, 'change', b'', 1 << 2)  # RESET_ASSERT
+            db.insert_message(sid, 0.2, 'tpdu',
+                              bytes.fromhex('00b0000009') + bytes.fromhex('082905102143658709') + bytes.fromhex('9000'))
+            msgs = db.get_messages(sid)
+            self.assertNotIn('file', msgs[2]['decoded'])
+
+    def test_gap_resets_selection(self):
+        # A capture gap (device disconnected/reconnected) means messages may
+        # have been missed, so the selection must be reset.
+        import tempfile
+        from simtrace2_pysniff.server.database import Database
+        with tempfile.NamedTemporaryFile(suffix='.db') as tmp:
+            db = Database(tmp.name)
+            sid = db.create_session('capture')
+            db.insert_message(sid, 0.0, 'tpdu', bytes.fromhex('a0a40804047fff6f079000'))
+            db.insert_message(sid, 0.1, 'gap', b'', 0)
             db.insert_message(sid, 0.2, 'tpdu',
                               bytes.fromhex('00b0000009') + bytes.fromhex('082905102143658709') + bytes.fromhex('9000'))
             msgs = db.get_messages(sid)

@@ -76,6 +76,9 @@ body { font: 14px/1.5 system-ui, sans-serif; background: var(--bg); color: var(-
 .header-title a { color: var(--accent); text-decoration: none; }
 .header-title a:hover { text-decoration: underline; }
 .header-right { margin-left: auto; display: flex; align-items: center; gap: 12px; padding: 8px 16px; }
+.capture-chip { font-size: 12px; font-weight: 600; padding: 4px 10px; border-radius: 12px; white-space: nowrap; }
+.capture-chip.live { color: var(--green); background: var(--accent-bg); }
+.capture-chip.warn { color: var(--warn); background: var(--warning-bg); }
 .header-right a { color: var(--link); text-decoration: none; font-size: 13px; }
 .header-right a:hover { color: var(--link-hover); }
 .header-right button { padding: 4px 10px; font-size: 14px; cursor: pointer; background: var(--bg-input); border: 1px solid var(--border); border-radius: 4px; color: var(--text); }
@@ -115,6 +118,11 @@ body { font: 14px/1.5 system-ui, sans-serif; background: var(--bg); color: var(-
 .apdu-sw.sw-pending { color: var(--accent); }
 .apdu-sw.sw-warn { color: var(--warn); }
 .apdu-sw.sw-error { color: var(--error); }
+.apdu-err { color: var(--error); white-space: nowrap; }
+.apdu-gap { background: var(--warning-bg); border-bottom: 1px solid var(--warn); }
+.apdu-gap .apdu-type { color: var(--warn); }
+.apdu-gap .apdu-data { color: var(--warn); }
+.device-warn { padding: 8px 12px; font-size: 12px; color: var(--warn); background: var(--warning-bg); border-bottom: 1px solid var(--warn); }
 
 /* APDU detail panel */
 .apdu-detail { display: flex; flex-direction: column; max-height: 40%; overflow-y: auto; border-top: 2px solid var(--accent); background: var(--bg-panel); flex-shrink: 0; }
@@ -232,6 +240,7 @@ body { font: 14px/1.5 system-ui, sans-serif; background: var(--bg); color: var(-
     </div>
     <div class="header-title">SIM-ME <a href="https://osmocom.org/projects/baseband/wiki/GSMTAP" target="_blank" rel="noopener">GSMTAP</a> <span data-l10n="trace analyser">trace analyser</span> <span class="pwa-version" id="pwa-version"></span></div>
     <div class="header-right">
+        <span class="capture-chip" id="capture-chip" style="display:none"></span>
         <button id="install-btn" data-l10n="Install PWA">Install PWA</button>
         <a href="https://github.com/anttro/simtrace2-pysniff" target="_blank" rel="noopener">GitHub</a>
         <button id="lang-btn" onclick="toggleLang()" title="Language / Язык">EN</button>
@@ -267,6 +276,7 @@ body { font: 14px/1.5 system-ui, sans-serif; background: var(--bg); color: var(-
         <span><span class="status-dot off" id="status-dot"></span><span id="status-text" data-l10n="Not connected">Not connected</span></span>
         <span id="msg-count" style="color:var(--text-muted);">0 messages</span>
     </div>
+    <div class="device-warn" id="device-warn" style="display:none">⚠ <span id="device-warn-text"></span></div>
 </div>
 
 <!-- Sessions Panel -->
@@ -348,6 +358,7 @@ const STATE = {
     serverName: '',
     serverVersion: '',
     captureMode: '',
+    deviceConnected: null,
 };
 
 const API_BASE = () => STATE.serverUrl;
@@ -378,6 +389,7 @@ function ins_label(msg) {
     if (msg.type === 'pps') return 'PPS';
     if (msg.type === 'change') return 'STATE CHANGE';
     if (msg.type === 'fidi') return 'FIDI';
+    if (msg.type === 'gap') return 'CAPTURE GAP';
     const d = msg.data;
     if (d && d.length >= 2) {
         const ins = d.slice(2, 4);
@@ -391,6 +403,7 @@ function _fallback_label(msg) {
     if (msg.type === 'pps') return 'PPS';
     if (msg.type === 'change') return 'STATE CHANGE';
     if (msg.type === 'fidi') return 'FIDI';
+    if (msg.type === 'gap') return 'CAPTURE GAP';
     const data = msg.data;
     if (data && data.length >= 2) {
         const ins = data.slice(2, 4);
@@ -458,8 +471,14 @@ function data_text(m) {
 }
 
 function cmd_description(m) {
+    if (m.type === 'gap') return t('device disconnected — messages may be missing');
     if (m.decoded && m.decoded.summary) return m.decoded.summary;
     return data_text(m);
+}
+
+function error_names(m) {
+    const d = m.decoded;
+    return (d && Array.isArray(d.errors) && d.errors.length) ? d.errors : null;
 }
 
 function sw_text(m) {
@@ -834,6 +853,7 @@ function atrPpsRows(decoded) {
         if (decoded.note) rows.push(['Note', decoded.note]);
     }
     rows.push(['Raw', (decoded.raw || '')]);
+    if (decoded.errors) rows.push(['Errors', decoded.errors.join(', ')]);
     return rows;
 }
 
@@ -844,6 +864,12 @@ function showDetail(msg, entry) {
 
     const d = el('apdu-detail');
     const decoded = msg.decoded;
+
+    if (msg.type === 'gap') {
+        d.innerHTML = `<div class="detail-header"><strong>Capture Gap</strong><span style="color:var(--text-muted)">${fmt_elapsed(msg.elapsed)}</span></div>
+            <div class="detail-body" style="color:var(--warn);">⚠ ${t('The device disconnected and reconnected — some APDUs may be missing from this trace.')}</div>`;
+        return;
+    }
 
     if (!decoded) {
         d.innerHTML = `<div class="detail-header"><strong>${ins_label(msg)}</strong><span style="color:var(--text-muted)">${fmt_elapsed(msg.elapsed)}</span></div>
@@ -959,6 +985,7 @@ function showDetail(msg, entry) {
             ${responseRows(decoded.response)}
             ${fileRows(decoded.file)}
             ${sw}
+            ${decoded.errors ? `<tr><td class="label">Errors</td><td class="value" style="color:var(--error)">${decoded.errors.join(', ')}</td></tr>` : ''}
         </table>
     </div>`;
 }
@@ -1213,13 +1240,23 @@ function renderMessages(skipScroll) {
     }
 
     list.innerHTML = filtered.map(({ m, idx }) => {
+        if (m.type === 'gap') {
+            return `<div class="apdu-entry apdu-gap" data-idx="${idx}">
+                <span class="apdu-time">${fmt_elapsed(m.elapsed)}</span>
+                <span class="apdu-type">⚠ CAPTURE GAP</span>
+                <span class="apdu-data">${cmd_description(m)}</span>
+            </div>`;
+        }
         const label = ins_label(m);
         const typeCls = m.type === 'atr' ? 'atr' : m.type === 'pps' ? 'pps' : '';
+        const errs = error_names(m);
+        const errBadge = errs ? `<span class="apdu-err" title="${errs.join(', ')}">⚠</span>` : '';
         return `<div class="apdu-entry" data-idx="${idx}">
             <span class="apdu-time">${fmt_elapsed(m.elapsed)}</span>
             <span class="apdu-type ${typeCls}">${label}</span>
             <span class="apdu-sw ${sw_class(m)}">${sw_text(m)}</span>
             <span class="apdu-data">${cmd_description(m)}</span>
+            ${errBadge}
         </div>`;
     }).join('');
 
@@ -1246,17 +1283,48 @@ function updateStatus() {
         text.textContent = t('Not connected');
     }
     count.textContent = t('{n} messages').replace('{n}', STATE.messages.length);
+    updateDeviceWarn();
+    updateCaptureChip();
+}
+
+function updateCaptureChip() {
+    const chip = el('capture-chip');
+    if (!chip) return;
+    const disconnected = STATE.captureMode === 'direct' && STATE.captureActive && STATE.deviceConnected === false;
+    if (disconnected) {
+        chip.style.display = '';
+        chip.className = 'capture-chip warn';
+        chip.textContent = '⚠ ' + t('device disconnected — reconnecting…');
+    } else if (STATE.captureActive) {
+        chip.style.display = '';
+        chip.className = 'capture-chip live';
+        chip.textContent = '● ' + t('LIVE') + ' · ' + t('{n} messages').replace('{n}', STATE.messages.length);
+    } else {
+        chip.style.display = 'none';
+    }
+}
+
+function updateDeviceWarn() {
+    const warn = el('device-warn');
+    if (!warn) return;
+    const disconnected = STATE.captureMode === 'direct' && STATE.captureActive && STATE.deviceConnected === false;
+    if (disconnected) {
+        warn.style.display = '';
+        el('device-warn-text').textContent = t('device disconnected — reconnecting…');
+    } else {
+        warn.style.display = 'none';
+    }
 }
 
 // ──────────────────── Live Polling ────────────────────
 let _lastAfter = 0;
 
 function startPolling() {
-    _lastAfter = 0;
     if (STATE.livePoller) return;
     STATE.livePoller = setInterval(async () => {
         try {
             const data = await API.getLatest(_lastAfter);
+            STATE.deviceConnected = data.device_connected;
             if (data.active) {
                 STATE.captureActive = true;
                 STATE.currentSessionId = data.session_id;
@@ -1289,6 +1357,7 @@ async function startCapture() {
         STATE.captureActive = true;
         STATE.currentSessionId = data.session_id;
         STATE.messages = [];
+        _lastAfter = 0;
         buildTypeCounts();
         buildTraceMap();
         renderSidePanel();
@@ -1426,6 +1495,7 @@ async function importPcapFile(file) {
 }
 
 async function loadSession(id) {
+    if (STATE.captureActive && !confirm(t('Opening a session stops the active capture. Continue?'))) return;
     try {
         // Stop any active capture so it can't write into the session being viewed.
         await API.stopCapture();
@@ -1563,6 +1633,7 @@ function connectServer() {
 }
 
 function disconnectServer() {
+    if (STATE.captureActive && !confirm(t('Capture is still running on the server — it will continue after you disconnect. Disconnect?'))) return;
     if (_connTimer) {
         clearInterval(_connTimer);
         _connTimer = null;
@@ -1585,10 +1656,6 @@ function disconnectServer() {
     btn.classList.add('disconnected');
     updateCaptureButton();
     stopPolling();
-    if (STATE.captureActive) {
-        STATE.captureActive = false;
-        STATE.currentSessionId = null;
-    }
     renderTraceEmptyState();
 }
 
@@ -1599,6 +1666,7 @@ async function checkConnection() {
         STATE.captureMode = data.capture_mode || '';
         STATE.serverName = data.server || 'simtrace-analyser-server';
         STATE.serverVersion = data.version || '';
+        STATE.deviceConnected = data.device_connected;
         el('conn-status').textContent = connectionStatusText();
         el('conn-status').className = 'conn-status connected';
         updateVersionWarn(data.version);
@@ -1610,8 +1678,18 @@ async function checkConnection() {
         el('status-dot').className = 'status-dot ' + (data.capture_active ? 'live' : 'paused');
         el('status-text').textContent = data.capture_active ? t('Capturing') : t('Connected');
         if (data.capture_active) {
+            if (data.session_id && data.session_id !== STATE.currentSessionId) {
+                // A different capture session than the one we were viewing —
+                // reset the stream so we re-fetch it from the start.
+                STATE.currentSessionId = data.session_id;
+                STATE.messages = [];
+                _lastAfter = 0;
+            }
             STATE.captureActive = true;
             STATE.currentSessionId = data.session_id;
+            startPolling();
+        } else {
+            STATE.captureActive = false;
         }
         updateCaptureButton();
         renderTraceEmptyState();
@@ -1734,6 +1812,12 @@ const LANG_RU = {
     'Import PCAP': 'Импорт PCAP',
     'New capture': 'Новый захват',
     'Server': 'Сервер',
+    'device disconnected — reconnecting…': 'устройство отключено — переподключение…',
+    'device disconnected — messages may be missing': 'устройство отключалось — сообщения могли быть потеряны',
+    'The device disconnected and reconnected — some APDUs may be missing from this trace.': 'Устройство отключалось и переподключалось — часть APDU может отсутствовать в трейсе.',
+    'LIVE': 'В ЭФИРЕ',
+    'Opening a session stops the active capture. Continue?': 'Открытие сессии остановит активный захват. Продолжить?',
+    'Capture is still running on the server — it will continue after you disconnect. Disconnect?': 'Захват всё ещё выполняется на сервере — он продолжится после отключения. Отключиться?',
     'Same origin': 'Тот же источник',
     'Custom URL': 'Свой URL',
     'Connect': 'Подключить',

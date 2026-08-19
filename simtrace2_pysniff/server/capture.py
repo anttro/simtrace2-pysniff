@@ -38,6 +38,11 @@ class DirectSniffer:
         )
         self._running = False
 
+    @property
+    def connected(self):
+        """True while the USB sniffer device is open."""
+        return self._session.connected
+
     def start(self):
         self._running = True
 
@@ -80,6 +85,14 @@ class CaptureManager:
     @property
     def latest_msg_id(self):
         return self._latest_msg_id
+
+    @property
+    def device_connected(self):
+        """True while the capture device is connected, or None when the
+        backend has no device concept (gsmtap)."""
+        if isinstance(self._backend, DirectSniffer):
+            return self._backend.connected
+        return None
 
     def start_session(self):
         if self._session_id is not None:

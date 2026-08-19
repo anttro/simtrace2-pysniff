@@ -3258,18 +3258,41 @@ CHANGE_FLAGS = {
     1 << 4: 'Waiting time timeout',
 }
 
+# Sniff data error flags (SNIFF_DATA_FLAG_ERROR_*, simtrace_prot.h).
+DATA_FLAGS = {
+    1 << 5: 'incomplete',
+    1 << 6: 'malformed',
+    1 << 7: 'checksum error',
+    1 << 8: 'overrun',
+    1 << 9: 'framing error',
+    1 << 10: 'parity error',
+}
+
+
+def _flag_names(flags, mapping):
+    names = []
+    for mask, name in sorted(mapping.items()):
+        if flags & mask:
+            names.append(name)
+    return names
+
 
 def decode_change(flags):
     """Decode SIMtrace2 sniff_change flags into a list of human-readable names."""
-    bits = []
-    for mask, name in sorted(CHANGE_FLAGS.items()):
-        if flags & mask:
-            bits.append(name)
+    bits = _flag_names(flags, CHANGE_FLAGS)
     return {
         'type': 'change',
         'flags_hex': f'{flags:08x}',
         'flags': bits if bits else ['no changes'],
     }
+
+
+def decode_data_flags(flags):
+    """Decode SIMtrace2 sniff_data error flags into a list of names (or None)."""
+    if not flags:
+        return None
+    names = _flag_names(flags, DATA_FLAGS)
+    return names or None
 
 
 def decode_fidi(raw_data):
@@ -3514,15 +3537,30 @@ def decode_sniff_msg(raw_data, msg_type, flags=0, prev=None):
     resolving GET RESPONSE.
     """
     if msg_type == 'tpdu' and raw_data:
-        return decode_message(raw_data, prev=prev)
+        result = decode_message(raw_data, prev=prev)
+        if result is not None:
+            errs = decode_data_flags(flags)
+            if errs:
+                result['errors'] = errs
+        return result
     if msg_type == 'change':
         return decode_change(flags)
     if msg_type == 'fidi' and raw_data:
         return decode_fidi(raw_data)
     if msg_type == 'atr':
-        return _decode_atr(raw_data)
+        result = _decode_atr(raw_data)
+        if result is not None:
+            errs = decode_data_flags(flags)
+            if errs:
+                result['errors'] = errs
+        return result
     if msg_type == 'pps':
-        return _decode_pps(raw_data)
+        result = _decode_pps(raw_data)
+        if result is not None:
+            errs = decode_data_flags(flags)
+            if errs:
+                result['errors'] = errs
+        return result
     return None
 
 

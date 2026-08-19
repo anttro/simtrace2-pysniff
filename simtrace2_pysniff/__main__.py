@@ -55,9 +55,6 @@ def build_parser():
     p.add_argument('--vendor', type=lambda x: int(x, 16),
                    default=0x1d50, metavar='HEX',
                    help='USB vendor ID (default: 0x1d50)')
-    p.add_argument('--product', type=lambda x: int(x, 16),
-                   default=None, metavar='HEX',
-                   help='USB product ID (default: auto-detect)')
 
     rec = p.add_argument_group('recovery options')
     rec.add_argument('--no-reconnect', action='store_true',
@@ -112,6 +109,7 @@ def main():
         reconnect_delay_max=args.reconnect_delay_max,
         backoff_factor=args.backoff_factor,
         inactivity_timeout=args.inactivity_timeout,
+        vendor_id=args.vendor,
     )
 
     exiting = False

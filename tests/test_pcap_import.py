@@ -208,6 +208,7 @@ class TestVersion(unittest.TestCase):
         class FakeCapture:
             active = False
             session_id = None
+            device_connected = None
 
         class Fake(RequestHandler):
             def __init__(self, db):

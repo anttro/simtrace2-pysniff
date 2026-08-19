@@ -45,13 +45,7 @@ def find_sniffer_device(vendor_id=USB_VENDOR_OPENMOKO):
 
     Returns a ``usb.core.Device`` on success, or ``None``.
     """
-    devices = list(usb.core.find(
-        find_all=True,
-        idVendor=vendor_id,
-        custom_match=lambda d: (
-            True
-        ),
-    ))
+    devices = list(usb.core.find(find_all=True, idVendor=vendor_id))
 
     for dev in devices:
         for cfg in dev:
@@ -71,7 +65,9 @@ def _get_ep_addrs(dev):
                 intf.bInterfaceSubClass == SIMTRACE_SNIFFER_USB_SUBCLASS):
             for ep in intf:
                 addr = ep.bEndpointAddress
-                if addr & 0x80:  # IN endpoint
+                # BULK IN endpoint only — the interrupt IN endpoint carries
+                # cardem notifications, not sniff data.
+                if addr & 0x80 and ep.bmAttributes & 0x03 == 0x02:
                     return addr
     return None
 
@@ -100,16 +96,19 @@ class SniffSession:
                  reconnect_delay_min=1.0,
                  reconnect_delay_max=30.0,
                  backoff_factor=1.5,
-                 inactivity_timeout=0.0):
+                 inactivity_timeout=0.0,
+                 vendor_id=USB_VENDOR_OPENMOKO):
         self._reconnect = reconnect
         self._reconnect_delay_min = reconnect_delay_min
         self._reconnect_delay_max = reconnect_delay_max
         self._backoff_factor = backoff_factor
         self._inactivity_timeout = inactivity_timeout
+        self._vendor_id = vendor_id
 
         self._dev = None
         self._devh = None
         self._ep_in = None
+        self._connected = False
         self._last_msg_time = 0.0
         self._disconnect_count = 0
 
@@ -121,7 +120,7 @@ class SniffSession:
         if self._devh is not None:
             return
 
-        dev = find_sniffer_device()
+        dev = find_sniffer_device(vendor_id=self._vendor_id)
         if dev is None:
             raise DeviceDisconnected('No SIMtrace2 sniffer device found')
 
@@ -147,6 +146,7 @@ class SniffSession:
         self._dev = dev
         self._devh = devh
         self._ep_in = ep_in
+        self._connected = True
         self._last_msg_time = time.monotonic()
         self._disconnect_count = 0
 
@@ -167,6 +167,7 @@ class SniffSession:
         self._devh = None
         self._dev = None
         self._ep_in = None
+        self._connected = False
 
     def _backoff_wait(self):
         """Sleep with exponential backoff before reconnecting."""
@@ -236,20 +237,38 @@ class SniffSession:
                 f'Inactivity timeout ({elapsed:.1f}s > '
                 f'{self._inactivity_timeout:.1f}s)')
 
+    @property
+    def connected(self):
+        """True while the USB sniffer device is open and claimed."""
+        return self._connected
+
     def iter_messages(self):
         """Generator of SniffMessage objects.
 
         Automatically reconnects on disconnect if ``reconnect=True``.
         Raises ``DeviceDisconnected`` if reconnect is disabled or exhausted.
+
+        When an established connection is lost and a reconnect is pending, a
+        single synthetic ``SniffMessage(type='gap')`` is yielded so callers can
+        record the interruption (messages may have been missed).
         """
+        from .protocol import SniffMessage
+
+        was_connected = False
         while True:
             try:
                 self._ensure_connected()
+                was_connected = True
                 yield from self._read_loop()
             except DeviceDisconnected:
                 self._close()
                 if not self._reconnect:
                     raise
+                if was_connected:
+                    yield SniffMessage(type='gap', type_hex='0x00', data=b'',
+                                       flags=0, slot_nr=0, seq_nr=0,
+                                       timestamp=time.time())
+                    was_connected = False
                 self._backoff_wait()
 
     def close(self):

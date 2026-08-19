@@ -257,11 +257,11 @@ class Database:
         from .decode import decode_sniff_msg
         rows = self._conn.execute(
             "SELECT data, type FROM messages WHERE session_id=? AND id < ? "
-            "AND type IN ('tpdu','atr','change') ORDER BY id DESC LIMIT 500",
+            "AND type IN ('tpdu','atr','change','gap') ORDER BY id DESC LIMIT 500",
             (session_id, before_id)).fetchall()
         states = {}
         for data, typ in reversed(rows):
-            if typ in ('atr', 'change'):
+            if typ in ('atr', 'change', 'gap'):
                 states = {}
                 continue
             channel = data[0] & 0x03 if data and len(data) >= 1 else 0
@@ -358,7 +358,22 @@ class Database:
             if msg['type'] == 'tpdu' and d and d.get('ins_hex'):
                 st['sel'], st['df'], st['sfi_map'] = self._advance_state(d, st['sel'], st['df'], st['sfi_map'])
                 st['prev'] = self._context_from_decoded(d)
-            elif msg['type'] in ('atr', 'change'):
+            elif msg['type'] == 'atr':
                 states = {}
+            elif msg['type'] == 'gap':
+                # Device disconnected and reconnected — messages may have been
+                # missed, so the selection is uncertain.
+                states = {}
+            elif msg['type'] == 'change':
+                # Only card-level changes invalidate the selection.  A
+                # waiting-time timeout interrupts a single TPDU but leaves the
+                # card selected, so the phone usually just retries.
+                from ..protocol import (
+                    CHANGE_FLAG_CARD_INSERT, CHANGE_FLAG_CARD_EJECT,
+                    CHANGE_FLAG_RESET_ASSERT, CHANGE_FLAG_RESET_DEASSERT,
+                )
+                if msg['flags'] & (CHANGE_FLAG_CARD_INSERT | CHANGE_FLAG_CARD_EJECT |
+                                   CHANGE_FLAG_RESET_ASSERT | CHANGE_FLAG_RESET_DEASSERT):
+                    states = {}
             msgs.append(msg)
         return msgs

@@ -202,6 +202,7 @@ class RequestHandler(BaseHTTPRequestHandler):
             'session_id': capture.session_id if capture else None,
             'mode': active_session['mode'] if active_session else None,
             'messages_count': self.db.count_messages(capture.session_id) if capture and capture.session_id else 0,
+            'device_connected': capture.device_connected if capture else None,
         })
 
     def _handle_list_sessions(self):
@@ -258,7 +259,8 @@ class RequestHandler(BaseHTTPRequestHandler):
     def _handle_capture_latest(self, params):
         after_id = int(params.get('after', [0])[0])
         if not self.capture or not self.capture.active:
-            self._send_json({'messages': [], 'next_after': after_id, 'active': False})
+            self._send_json({'messages': [], 'next_after': after_id, 'active': False,
+                             'device_connected': self.capture.device_connected if self.capture else None})
             return
         msg_id = self.capture.latest_msg_id
         messages = self.db.get_messages_after(self.capture.session_id, after_id)
@@ -267,12 +269,14 @@ class RequestHandler(BaseHTTPRequestHandler):
             'next_after': msg_id,
             'active': True,
             'session_id': self.capture.session_id,
+            'device_connected': self.capture.device_connected,
         })
 
     def _handle_capture_status(self):
         self._send_json({
             'active': self.capture.active if self.capture else False,
             'session_id': self.capture.session_id if self.capture else None,
+            'device_connected': self.capture.device_connected if self.capture else None,
         })
 
     def _handle_capture_start(self):

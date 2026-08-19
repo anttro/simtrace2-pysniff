@@ -57,6 +57,36 @@ class TestCaptureManager(unittest.TestCase):
         sn._session = _DisconnectingSession()
         self.assertEqual(list(sn.iter_messages()), [])
 
+    def test_capture_gap_message_inserted(self):
+        # A 'gap' marker yielded by the backend is stored as a message.
+        mgr, db = self._manager(_FakeBackend([
+            ('gap', b'', 0),
+            ('tpdu', b'\x80\xf2\x00\x00\x00', 0),
+        ]))
+        sid = mgr.start_session()
+        self.assertEqual(mgr.stop_session(), sid)
+        msgs = db.get_messages(sid)
+        self.assertEqual([m['type'] for m in msgs], ['gap', 'tpdu'])
+
+    def test_direct_sniffer_connected(self):
+        from simtrace2_pysniff.server.capture import DirectSniffer
+
+        class _FakeSession:
+            connected = True
+
+        sn = DirectSniffer()
+        sn._session = _FakeSession()
+        self.assertTrue(sn.connected)
+        _FakeSession.connected = False
+        self.assertFalse(sn.connected)
+
+    def test_device_connected_gsmtap_none(self):
+        from simtrace2_pysniff.server.capture import GsmtapListener
+        listener = GsmtapListener(bind_port=0)
+        self.addCleanup(listener.stop)
+        mgr, _ = self._manager(listener)
+        self.assertIsNone(mgr.device_connected)
+
 
 if __name__ == '__main__':
     unittest.main()
