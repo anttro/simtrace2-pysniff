@@ -956,15 +956,18 @@ COMMAND_QUALIFIERS = {
 def _command_qualifier(cmd_type, qualifier):
     """Decode a Command Qualifier (Command Details byte 3) into a string.
 
-    Returns None when no meaningful qualifier is present, a decoded name
-    when a table exists (including a table's own '00' entry), or a raw
-    '0xXX' for a non-zero qualifier without a table.
+    Returns None when no meaningful qualifier is present, the raw '0xXX'
+    for a non-zero qualifier without a table, or '0xXX <name>' when a
+    table entry exists.
     """
     if qualifier is None:
         return None
     table = COMMAND_QUALIFIERS.get(cmd_type)
     if table:
-        return table.get(qualifier, f'0x{qualifier:02X}')
+        name = table.get(qualifier)
+        if name is None:
+            return f'0x{qualifier:02X}'
+        return f'0x{qualifier:02X} {name}'
     if qualifier == 0x00:
         return None
     return f'0x{qualifier:02X}'
@@ -3031,6 +3034,9 @@ def _build_summary(result):
         fd = response.get('file_descriptor')
         if fd:
             parts.append(_fcp_summary(result['response_for'], fd, response))
+        elif response.get('tar'):
+            st = response.get('status') or {}
+            parts.append(f"{st.get('name') or ('0x' + st.get('code', ''))} · TAR {response['tar']}")
         else:
             parts.append('response for ' + result['response_for'])
     if response and response.get('name'):
@@ -3236,6 +3242,12 @@ def decode_message(raw_data, prev=None):
                             'ef': KNOWN_FIDS.get(fid, fid.upper()),
                             'record_numbers': list(remaining[:cmd_body_len]),
                         }
+                elif prev_ins == 0xC2:  # ENVELOPE → Response Packet (PoR)
+                    data = remaining[:cmd_body_len]
+                    # RPI mapping precedes the packet: UDHL='02', IEIa='71',
+                    # IEIDLa='00' (TS 31.115 §4.4).
+                    if data[:3] == b'\x02\x71\x00':
+                        result['response'] = _decode_response_packet(data[3:])
                 else:
                     response = _decode_response_for(prev_ins, remaining[:cmd_body_len])
                     if response:

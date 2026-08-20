@@ -73,7 +73,7 @@ class TestCatDecoding(unittest.TestCase):
             '801200000BD0098103012600820281829000'))
         self.assertEqual(r['cat_command'], 'PROVIDE LOCAL INFORMATION')
         self.assertEqual(r['cmd']['qualifier'],
-                         'Location Info (MCC, MNC, LAC/TAC, Cell ID)')
+                         '0x00 Location Info (MCC, MNC, LAC/TAC, Cell ID)')
 
     def test_envelope_event_download(self):
         r = decode_message(bytes.fromhex(
@@ -186,20 +186,20 @@ class TestPliQualifier(unittest.TestCase):
         r = decode_message(bytes.fromhex(
             '8014000016810301260102028281030106130952F0991EC57A68009F'))
         self.assertEqual(r['response_to'], 'PROVIDE LOCAL INFORMATION')
-        self.assertEqual(r['response']['qualifier'], 'IMEI')
+        self.assertEqual(r['response']['qualifier'], '0x01 IMEI')
 
     def test_fetch_pli_location(self):
         r = decode_message(bytes.fromhex(
             '801200000BD0098103012600820281829000'))
         self.assertEqual(r['cat_command'], 'PROVIDE LOCAL INFORMATION')
         self.assertEqual(r['cmd']['qualifier'],
-                         'Location Info (MCC, MNC, LAC/TAC, Cell ID)')
+                         '0x00 Location Info (MCC, MNC, LAC/TAC, Cell ID)')
 
     def test_fetch_pli_date_time(self):
         r = decode_message(bytes.fromhex(
             '801200000BD0098103012603820281829000'))
         self.assertEqual(r['cat_command'], 'PROVIDE LOCAL INFORMATION')
-        self.assertEqual(r['cmd']['qualifier'], 'Date, time and time zone')
+        self.assertEqual(r['cmd']['qualifier'], '0x03 Date, time and time zone')
 
     def test_non_pli_no_qualifier(self):
         r = decode_message(bytes.fromhex(
@@ -221,6 +221,29 @@ class TestGetResponseContext(unittest.TestCase):
     def test_orphaned(self):
         r = decode_message(self.GET_RESPONSE, prev=None)
         self.assertIsNone(r['response_for'])
+
+    def test_get_response_por(self):
+        # GET RESPONSE after ENVELOPE SMS-PP DOWNLOAD → Response Packet (PoR).
+        r = decode_message(
+            bytes.fromhex('00C0000024') +
+            bytes.fromhex('027100001F0AB0000100000000C100000290000080041C043004400438044FD83CDF37FF') +
+            bytes.fromhex('9000'),
+            prev={'ins': 0xC2, 'ins_name': 'ENVELOPE', 'sw1': '61'})
+        self.assertEqual(r['response_for'], 'ENVELOPE')
+        self.assertEqual(r['response']['rpl'], 31)
+        self.assertEqual(r['response']['rhl'], 10)
+        self.assertEqual(r['response']['tar'], 'B00001')
+        self.assertEqual(r['response']['cntr'], '00000000C1')
+        self.assertEqual(r['response']['status'], {'code': '00', 'name': 'PoR OK'})
+        self.assertEqual(r['response']['data'], '0290000080041C043004400438044FD83CDF37FF')
+        self.assertIn('PoR OK · TAR B00001', r['summary'])
+
+    def test_get_response_non_por_not_parsed(self):
+        # A GET RESPONSE after ENVELOPE that is not a PoR must stay undecoded.
+        r = decode_message(bytes.fromhex('00C0000004') + bytes.fromhex('AABBCCDD') + bytes.fromhex('9000'),
+                           prev={'ins': 0xC2, 'ins_name': 'ENVELOPE', 'sw1': '61'})
+        self.assertEqual(r['response_for'], 'ENVELOPE')
+        self.assertNotIn('response', r)
 
 
 class TestFcpResponse(unittest.TestCase):
@@ -1512,13 +1535,13 @@ class TestRefresh(unittest.TestCase):
     def test_uicc_reset(self):
         r = decode_message(bytes.fromhex('801200000bd0098103010104820281829000'))
         self.assertEqual(r['cat_command'], 'REFRESH')
-        self.assertEqual(r['cmd']['qualifier'], 'UICC Reset')
+        self.assertEqual(r['cmd']['qualifier'], '0x04 UICC Reset')
         self.assertNotIn('file_list', r['cmd'])
         self.assertNotIn('aid', r['cmd'])
 
     def test_file_change_notification(self):
         r = decode_message(bytes.fromhex('8012000011d00f81030101018202818292046f076f209000'))
-        self.assertEqual(r['cmd']['qualifier'], 'File Change Notification')
+        self.assertEqual(r['cmd']['qualifier'], '0x01 File Change Notification')
         self.assertEqual(r['cmd']['file_list'], ['6F07', '6F20'])
 
 

@@ -95,7 +95,7 @@ body { font: 14px/1.5 system-ui, sans-serif; background: var(--bg); color: var(-
 .trace-topbar select { padding: 8px 12px; background: var(--bg-input); border: 1px solid var(--border); border-radius: 4px; color: var(--text); }
 .trace-topbar button { padding: 8px 16px; background: var(--accent); color: #fff; border: none; border-radius: 4px; cursor: pointer; font-weight: 600; }
 .trace-topbar button:hover { background: var(--accent-hover); }
-.trace-topbar button.stop { background: var(--bg-input); }
+.trace-topbar button.stop { background: var(--bg-input); color: var(--text); }
 .trace-topbar button.stop:hover { background: var(--bg-panel); }
 .trace-topbar button.connect { background: var(--warn); color: #0f172a; }
 .trace-topbar button.connect:hover { background: var(--warn-hover); }
@@ -590,6 +590,16 @@ function responseRows(resp) {
         for (const [k, v] of Object.entries(resp.local_info)) {
             rows.push([k, v]);
         }
+    }
+    if (resp.rpl !== undefined) {
+        rows.push(['Response packet', 'Response Packet Length ' + resp.rpl + ' · Response Header Length ' + resp.rhl]);
+        rows.push(['TAR', '0x' + resp.tar]);
+        rows.push(['CNTR', '0x' + resp.cntr]);
+        rows.push(['PCNTR', resp.pcntr]);
+        const st = resp.status || {};
+        rows.push(['Status', '0x' + st.code + (st.name ? ' — ' + st.name : '')]);
+        if (resp.rc_cc_ds) rows.push(['RC/CC/DS', resp.rc_cc_ds]);
+        if (resp.data) rows.push(['Response data', resp.data]);
     }
 
     if (!rows.length) return '';
