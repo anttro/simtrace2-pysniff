@@ -90,9 +90,10 @@ body { font: 14px/1.5 system-ui, sans-serif; background: var(--bg); color: var(-
 
 /* Trace view */
 .trace-topbar { display: flex; gap: 12px; padding: 12px 16px; background: var(--bg-panel); align-items: center; flex-shrink: 0; }
-.trace-topbar input { flex: 1; padding: 8px 12px; background: var(--bg-input); border: 1px solid var(--border); border-radius: 4px; color: var(--text); }
+.trace-topbar input { flex: 0 1 33.333%; padding: 8px 12px; background: var(--bg-input); border: 1px solid var(--border); border-radius: 4px; color: var(--text); }
 .trace-topbar input::placeholder { color: var(--text-muted); }
 .trace-topbar select { padding: 8px 12px; background: var(--bg-input); border: 1px solid var(--border); border-radius: 4px; color: var(--text); }
+.trace-topbar .filter-label { color: var(--text-muted); font-size: 13px; white-space: nowrap; }
 .trace-topbar button { padding: 8px 16px; background: var(--accent); color: #fff; border: none; border-radius: 4px; cursor: pointer; font-weight: 600; }
 .trace-topbar button:hover { background: var(--accent-hover); }
 .trace-topbar button.stop { background: var(--bg-input); color: var(--text); }
@@ -260,11 +261,12 @@ body { font: 14px/1.5 system-ui, sans-serif; background: var(--bg); color: var(-
 <div class="panel active" id="panel-trace">
     <div class="trace-topbar">
         <input type="text" id="search-input" data-l10n="Search hex bytes..." placeholder="Search hex bytes..." autocomplete="off">
+        <label for="filter-select" class="filter-label" data-l10n="Filter">Filter</label>
         <select id="filter-select">
             <option value="" data-l10n="All commands">All commands</option>
         </select>
         <button id="capture-btn" data-l10n="Start Capture">Start Capture</button>
-        <span id="session-name-display" style="display:none; color:var(--text-muted); font-size:15px;"></span>
+        <span id="session-name-display" style="display:none; color:var(--text-muted); font-size:15px; font-weight:700;"></span>
     </div>
     <div class="trace-main">
         <div class="trace-left">
@@ -275,8 +277,8 @@ body { font: 14px/1.5 system-ui, sans-serif; background: var(--bg); color: var(-
         </div>
         <div class="side-panel" id="side-panel">
             <div class="side-tabs">
-                <button class="side-tab active" data-view="stats" data-l10n="Stats">Stats</button>
-                <button class="side-tab" data-view="map" data-l10n="Map">Map</button>
+                <button class="side-tab active" data-view="map" data-l10n="Map">Map</button>
+                <button class="side-tab" data-view="stats" data-l10n="Stats">Stats</button>
             </div>
             <div id="type-counts">—</div>
             <div id="type-map" style="display:none">—</div>
@@ -362,7 +364,7 @@ const STATE = {
     messages: [],
     typeCounts: [],
     traceMap: [],
-    sideView: 'stats',
+    sideView: 'map',
     pendingDeleteId: null,
     serverAvailable: false,
     serverName: '',
@@ -1842,6 +1844,7 @@ const LANG_RU = {
     'Install PWA': 'Установить PWA',
     'Search hex bytes...': 'Поиск по данным (hex)...',
     'All commands': 'Все команды',
+    'Filter': 'Фильтр',
     'Start Capture': 'Начать захват',
     'Stop Capture': 'Остановить захват',
     'Connect to server': 'Подключиться к серверу',
