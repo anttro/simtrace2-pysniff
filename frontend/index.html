@@ -380,6 +380,7 @@ const STATE = {
     captureMode: '',
     deviceConnected: null,
     mapExpanded: new Set(),
+    deepLinkHandled: false,
 };
 
 const API_BASE = () => STATE.serverUrl;
@@ -1068,6 +1069,24 @@ function command_cat(ins) {
     return null;
 }
 
+function session_link(id) {
+    return location.href.split('#')[0] + '#session=' + id;
+}
+
+function is_loopback() {
+    return ['localhost', '127.0.0.1', '::1', '[::1]', '0.0.0.0'].includes(location.hostname);
+}
+
+function copySessionLink(id) {
+    const url = session_link(id);
+    const prompt_ = () => prompt(t('Share link'), url);
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(url).catch(prompt_);
+    } else {
+        prompt_();
+    }
+}
+
 function buildTraceMap() {
     const msgs = STATE.messages;
     const groups = [];
@@ -1503,6 +1522,7 @@ async function loadSessions() {
                 </div>
                 <div class="session-actions">
                     <a class="session-download" href="${API_BASE()}/api/sessions/${s.id}/pcap">${t('Download PCAP')}</a>
+                    ${is_loopback() ? '' : `<button class="session-copy" data-sid="${s.id}">${t('Copy link')}</button>`}
                     <button class="session-delete" data-sid="${s.id}">${t('Delete')}</button>
                 </div>
             </div>`;
@@ -1534,6 +1554,12 @@ async function loadSessions() {
                 e.stopPropagation();
                 const sid = parseInt(btn.dataset.sid);
                 showDeleteModal(sid);
+            });
+        });
+        grid.querySelectorAll('.session-copy').forEach(btn => {
+            btn.addEventListener('click', e => {
+                e.stopPropagation();
+                copySessionLink(parseInt(btn.dataset.sid));
             });
         });
     } catch (e) {}
@@ -1576,6 +1602,7 @@ async function loadSession(id) {
         renderMessages();
         el('session-name-display').style.display = 'inline';
         el('session-name-display').textContent = t('Session: ') + (data.session.name || '#' + id);
+        history.replaceState(null, '', '#session=' + id);
     } catch (e) {
         alert(t('Failed to load session'));
     }
@@ -1757,6 +1784,11 @@ async function checkConnection() {
         }
         updateCaptureButton();
         renderTraceEmptyState();
+        if (!STATE.deepLinkHandled) {
+            STATE.deepLinkHandled = true;
+            const m = location.hash.match(/^#session=(\d+)$/);
+            if (m) loadSession(parseInt(m[1]));
+        }
     } catch (e) {
         STATE.serverAvailable = false;
         STATE.captureMode = '';
@@ -1900,6 +1932,8 @@ const LANG_RU = {
     'msgs': 'сообщ.',
     'active': 'активна',
     'Download PCAP': 'Скачать PCAP',
+    'Copy link': 'Копировать ссылку',
+    'Share link': 'Ссылка для общего доступа',
     '{n} messages': '{n} сообщений',
     '{n} session(s) · {size}': '{n} сессий · {size}',
     '{n} session · {size}': '{n} сессия · {size}',
@@ -2049,6 +2083,7 @@ function init() {
             STATE.sessionViewId = null;
             STATE.currentSessionName = null;
             updateCaptureButton();
+            history.replaceState(null, '', location.pathname);
         }
         startCapture();
     });
@@ -2063,6 +2098,7 @@ function init() {
         STATE.sessionViewId = null;
         STATE.currentSessionName = null;
         updateCaptureButton();
+        history.replaceState(null, '', location.pathname);
         switchTab('trace');
         startCapture();
     });
