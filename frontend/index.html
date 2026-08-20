@@ -149,6 +149,8 @@ body { font: 14px/1.5 system-ui, sans-serif; background: var(--bg); color: var(-
 .side-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
 .map-item { padding: 3px 8px; cursor: pointer; border-radius: 4px; font-size: 13px; color: var(--text); word-break: break-word; }
 .map-item:hover { background: var(--bg-input); }
+.map-files-toggle { color: var(--accent); cursor: pointer; }
+.map-files-toggle .map-arrow { color: var(--text-muted); }
 
 /* Status bar */
 .status-bar { display: flex; padding: 8px 16px; background: var(--bg-panel); border-top: 1px solid var(--bg-input); font-size: 13px; gap: 16px; flex-shrink: 0; }
@@ -359,6 +361,7 @@ const STATE = {
     serverVersion: '',
     captureMode: '',
     deviceConnected: null,
+    mapExpanded: new Set(),
 };
 
 const API_BASE = () => STATE.serverUrl;
@@ -1037,6 +1040,8 @@ function buildTraceMap() {
         if (ins === 'c0') { i++; continue; }  // skip GET RESPONSE
         if (ins && MAP_RW_INS.has(ins)) {
             // Split the run into per-file records (delimited by SELECT).
+            // Each READ/UPDATE op contributes its own resolved file, so
+            // SFI-addressed files (never SELECTed) are attributed correctly.
             const access = [];
             let cur = null;
             let j = i;
@@ -1046,47 +1051,50 @@ function buildTraceMap() {
                 if (!jins || !MAP_RW_INS.has(jins)) break;
                 if (jins === 'a4') {
                     if (cur) access.push(cur);
-                    cur = { file: map_file_label(msgs[j]), hasRead: false, hasWrite: false, start: j, end: j };
-                } else if (is_write_ins(jins)) {
-                    if (!cur) cur = { file: map_file_label(msgs[j]), hasRead: false, hasWrite: false, start: j, end: j };
-                    cur.hasWrite = true;
-                    cur.end = j;
-                } else {  // SEARCH / READ
-                    if (!cur) cur = { file: map_file_label(msgs[j]), hasRead: false, hasWrite: false, start: j, end: j };
-                    cur.hasRead = true;
+                    cur = { files: [], selNote: map_file_label(msgs[j]), hasRead: false, hasWrite: false, start: j, end: j };
+                } else {
+                    if (!cur) cur = { files: [], selNote: null, hasRead: false, hasWrite: false, start: j, end: j };
+                    const f = map_file_label(msgs[j]);
+                    if (f && !cur.files.includes(f)) cur.files.push(f);
+                    if (is_write_ins(jins)) cur.hasWrite = true; else cur.hasRead = true;
                     cur.end = j;
                 }
                 j++;
             }
             if (cur) access.push(cur);
+            // Records with no read/write ops (pure catalog SELECT) fall back to
+            // the selected file's note.
+            for (const rec of access) {
+                if (rec.files.length === 0 && rec.selNote) rec.files = [rec.selNote];
+            }
 
             let k = 0;
             while (k < access.length) {
                 const rec = access[k];
                 if (rec.hasRead && rec.hasWrite) {
-                    groups.push({ label: t('Read/write:') + ' ' + (rec.file || '—'), start: rec.start, end: rec.end });
+                    groups.push({ kind: 'rw', files: rec.files, start: rec.start, end: rec.end });
                     k++;
                 } else if (rec.hasWrite) {
                     const files = [];
                     let end = rec.end;
                     let m = k;
                     while (m < access.length && access[m].hasWrite && !access[m].hasRead) {
-                        if (access[m].file && !files.includes(access[m].file)) files.push(access[m].file);
+                        for (const f of access[m].files) if (f && !files.includes(f)) files.push(f);
                         end = access[m].end;
                         m++;
                     }
-                    groups.push({ label: t('Writes:') + ' ' + (files.join(', ') || '—'), start: rec.start, end });
+                    groups.push({ kind: 'write', files, start: rec.start, end });
                     k = m;
                 } else {
                     const files = [];
                     let end = rec.end;
                     let m = k;
                     while (m < access.length && !access[m].hasWrite) {
-                        if (access[m].file && !files.includes(access[m].file)) files.push(access[m].file);
+                        for (const f of access[m].files) if (f && !files.includes(f)) files.push(f);
                         end = access[m].end;
                         m++;
                     }
-                    groups.push({ label: t('Reads:') + ' ' + (files.join(', ') || '—'), start: rec.start, end });
+                    groups.push({ kind: 'read', files, start: rec.start, end });
                     k = m;
                 }
             }
@@ -1113,9 +1121,13 @@ function renderSidePanel() {
     ).join('') || t('No commands');
 
     const mapEl = el('type-map');
-    mapEl.innerHTML = STATE.traceMap.map(g =>
-        `<div class="map-item" data-start="${g.start}">${g.label}</div>`
-    ).join('') || t('No commands');
+    mapEl.innerHTML = STATE.traceMap.map(g => {
+        if (g.kind) {
+            const kind = g.kind === 'rw' ? t('Read/write:') : g.kind === 'write' ? t('Writes:') : t('Reads:');
+            return `<div class="map-item" data-start="${g.start}">${kind} ${mapFilesHtml(g)}</div>`;
+        }
+        return `<div class="map-item" data-start="${g.start}">${g.label}</div>`;
+    }).join('') || t('No commands');
 
     const showMap = STATE.sideView === 'map';
     el('type-counts').style.display = showMap ? 'none' : '';
@@ -1123,6 +1135,15 @@ function renderSidePanel() {
     document.querySelectorAll('#side-panel .side-tab').forEach(tab => {
         tab.classList.toggle('active', tab.dataset.view === STATE.sideView);
     });
+}
+
+function mapFilesHtml(g) {
+    const files = g.files || [];
+    if (files.length === 0) return '—';
+    if (files.length <= 3) return files.join(', ');
+    const expanded = STATE.mapExpanded.has(g.start);
+    const label = expanded ? files.join(', ') : t('{n} files').replace('{n}', files.length);
+    return `<span class="map-files-toggle" data-start="${g.start}">${label} <span class="map-arrow">${expanded ? '▾' : '▸'}</span></span>`;
 }
 
 function populateFilterOptions() {
@@ -1358,6 +1379,7 @@ async function startCapture() {
         STATE.currentSessionId = data.session_id;
         STATE.messages = [];
         _lastAfter = 0;
+        STATE.mapExpanded.clear();
         buildTypeCounts();
         buildTraceMap();
         renderSidePanel();
@@ -1508,6 +1530,7 @@ async function loadSession(id) {
         STATE.captureActive = false;
         STATE.currentSessionName = data.session.name || t('Session #') + id;
         STATE.messages = data.messages;
+        STATE.mapExpanded.clear();
         switchTab('trace');
         updateCaptureButton();
         renderMessages();
@@ -1684,6 +1707,7 @@ async function checkConnection() {
                 STATE.currentSessionId = data.session_id;
                 STATE.messages = [];
                 _lastAfter = 0;
+                STATE.mapExpanded.clear();
             }
             STATE.captureActive = true;
             STATE.currentSessionId = data.session_id;
@@ -1800,6 +1824,7 @@ const LANG_RU = {
     'Reads:': 'Чтение:',
     'Writes:': 'Запись:',
     'Read/write:': 'Чтение/запись:',
+    '{n} files': '{n} файлов',
     'Not connected': 'Не подключено',
     'Live': 'Захват',
     'Session': 'Сессия',
@@ -2054,6 +2079,15 @@ function init() {
         const tab = e.target.closest('.side-tab');
         if (tab) {
             STATE.sideView = tab.dataset.view;
+            renderSidePanel();
+            return;
+        }
+        const toggle = e.target.closest('.map-files-toggle');
+        if (toggle) {
+            e.stopPropagation();
+            const start = parseInt(toggle.dataset.start);
+            if (STATE.mapExpanded.has(start)) STATE.mapExpanded.delete(start);
+            else STATE.mapExpanded.add(start);
             renderSidePanel();
             return;
         }
