@@ -151,6 +151,14 @@ body { font: 14px/1.5 system-ui, sans-serif; background: var(--bg); color: var(-
 .map-item:hover { background: var(--bg-input); }
 .map-files-toggle { color: var(--accent); cursor: pointer; }
 .map-files-toggle .map-arrow { color: var(--text-muted); }
+.map-item.map-proactive { font-weight: 700; color: #a78bfa; }
+[data-theme="light"] .map-item.map-proactive { color: #6d28d9; }
+.map-item.map-tr { font-weight: 700; color: #22d3ee; }
+[data-theme="light"] .map-item.map-tr { color: #0e7490; }
+.map-item.map-envelope { font-weight: 600; color: #fbbf24; }
+[data-theme="light"] .map-item.map-envelope { color: #b45309; }
+.map-item.map-auth { font-weight: 600; color: #f87171; }
+[data-theme="light"] .map-item.map-auth { color: #dc2626; }
 
 /* Status bar */
 .status-bar { display: flex; padding: 8px 16px; background: var(--bg-panel); border-top: 1px solid var(--bg-input); font-size: 13px; gap: 16px; flex-shrink: 0; }
@@ -1041,6 +1049,15 @@ function map_other_label(m) {
     return stat_label(m);
 }
 
+// Map-view styling category for a single-message group.
+function map_item_cat(ins) {
+    if (ins === '12') return 'proactive';                    // FETCH
+    if (ins === '14' || ins === '10' || ins === 'aa') return 'tr';  // TERMINAL RESPONSE / PROFILE / CAPABILITY
+    if (ins === 'c2') return 'envelope';                     // ENVELOPE
+    if (ins === '88' || ins === '89') return 'auth';         // AUTHENTICATE
+    return 'other';
+}
+
 function buildTraceMap() {
     const msgs = STATE.messages;
     const groups = [];
@@ -1082,7 +1099,7 @@ function buildTraceMap() {
             while (k < access.length) {
                 const rec = access[k];
                 if (rec.hasRead && rec.hasWrite) {
-                    groups.push({ kind: 'rw', files: rec.files, start: rec.start, end: rec.end });
+                    groups.push({ kind: 'rw', cat: 'file', files: rec.files, start: rec.start, end: rec.end });
                     k++;
                 } else if (rec.hasWrite) {
                     const files = [];
@@ -1093,7 +1110,7 @@ function buildTraceMap() {
                         end = access[m].end;
                         m++;
                     }
-                    groups.push({ kind: 'write', files, start: rec.start, end });
+                    groups.push({ kind: 'write', cat: 'file', files, start: rec.start, end });
                     k = m;
                 } else {
                     const files = [];
@@ -1104,7 +1121,7 @@ function buildTraceMap() {
                         end = access[m].end;
                         m++;
                     }
-                    groups.push({ kind: 'read', files, start: rec.start, end });
+                    groups.push({ kind: 'read', cat: 'file', files, start: rec.start, end });
                     k = m;
                 }
             }
@@ -1112,10 +1129,10 @@ function buildTraceMap() {
         } else if (ins === 'f2') {
             let j = i;
             while (j < msgs.length && _ins_hex(msgs[j]) === 'f2') j++;
-            groups.push({ label: 'STATUS: ' + (j - i), start: i, end: j - 1 });
+            groups.push({ label: 'STATUS: ' + (j - i), cat: 'status', start: i, end: j - 1 });
             i = j;
         } else {
-            groups.push({ label: map_other_label(msgs[i]), start: i, end: i });
+            groups.push({ label: map_other_label(msgs[i]), cat: map_item_cat(ins), start: i, end: i });
             i++;
         }
     }
@@ -1132,11 +1149,12 @@ function renderSidePanel() {
 
     const mapEl = el('type-map');
     mapEl.innerHTML = STATE.traceMap.map(g => {
+        const cls = 'map-item' + (g.cat ? ' map-' + g.cat : '');
         if (g.kind) {
             const kind = g.kind === 'rw' ? t('Read/write:') : g.kind === 'write' ? t('Writes:') : t('Reads:');
-            return `<div class="map-item" data-start="${g.start}">${kind} ${mapFilesHtml(g)}</div>`;
+            return `<div class="${cls}" data-start="${g.start}">${kind} ${mapFilesHtml(g)}</div>`;
         }
-        return `<div class="map-item" data-start="${g.start}">${g.label}</div>`;
+        return `<div class="${cls}" data-start="${g.start}">${g.label}</div>`;
     }).join('') || t('No commands');
 
     const showMap = STATE.sideView === 'map';
