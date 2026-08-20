@@ -34,6 +34,10 @@
     --yellow: #facc15;
     --link: #94a3b8;
     --link-hover: #e2e8f0;
+    --proactive: #a78bfa;
+    --tr: #22d3ee;
+    --envelope: #fbbf24;
+    --auth: #f87171;
 }
 [data-theme="light"] {
     --bg: #fafafa;
@@ -60,6 +64,10 @@
     --yellow: #ca8a04;
     --link: #6b7280;
     --link-hover: #1f2937;
+    --proactive: #6d28d9;
+    --tr: #0e7490;
+    --envelope: #b45309;
+    --auth: #dc2626;
 }
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -113,6 +121,10 @@ body { font: 14px/1.5 system-ui, sans-serif; background: var(--bg); color: var(-
 .apdu-type { color: var(--text); font-weight: 600; min-width: 150px; }
 .apdu-type.atr { color: var(--green); }
 .apdu-type.pps { color: var(--yellow); }
+.apdu-type.cat-proactive { font-weight: 700; color: var(--proactive); }
+.apdu-type.cat-tr { font-weight: 700; color: var(--tr); }
+.apdu-type.cat-envelope { color: var(--envelope); }
+.apdu-type.cat-auth { color: var(--auth); }
 .apdu-data { font-family: monospace; color: var(--text-dim); word-break: break-all; flex: 1; }
 .apdu-sw { font-family: monospace; color: var(--text-muted); white-space: nowrap; min-width: 52px; }
 .apdu-sw.sw-ok { color: var(--green); }
@@ -152,14 +164,10 @@ body { font: 14px/1.5 system-ui, sans-serif; background: var(--bg); color: var(-
 .map-item:hover { background: var(--bg-input); }
 .map-files-toggle { color: var(--accent); cursor: pointer; }
 .map-files-toggle .map-arrow { color: var(--text-muted); }
-.map-item.map-proactive { font-weight: 700; color: #a78bfa; }
-[data-theme="light"] .map-item.map-proactive { color: #6d28d9; }
-.map-item.map-tr { font-weight: 700; color: #22d3ee; }
-[data-theme="light"] .map-item.map-tr { color: #0e7490; }
-.map-item.map-envelope { font-weight: 600; color: #fbbf24; }
-[data-theme="light"] .map-item.map-envelope { color: #b45309; }
-.map-item.map-auth { font-weight: 600; color: #f87171; }
-[data-theme="light"] .map-item.map-auth { color: #dc2626; }
+.map-item.map-proactive { font-weight: 700; color: var(--proactive); }
+.map-item.map-tr { font-weight: 700; color: var(--tr); }
+.map-item.map-envelope { font-weight: 600; color: var(--envelope); }
+.map-item.map-auth { font-weight: 600; color: var(--auth); }
 
 /* Status bar */
 .status-bar { display: flex; padding: 8px 16px; background: var(--bg-panel); border-top: 1px solid var(--bg-input); font-size: 13px; gap: 16px; flex-shrink: 0; }
@@ -1045,19 +1053,19 @@ function is_write_ins(ins) { return ins === 'd6' || ins === 'dc'; }
 
 function map_other_label(m) {
     const d = m.decoded;
-    if (d && d.ins_name === 'ENVELOPE' && d.summary) {
-        return 'ENVELOPE: ' + d.summary;
+    if (d && d.ins_name === 'ENVELOPE') {
+        return d.cat_command || 'ENVELOPE';
     }
     return stat_label(m);
 }
 
-// Map-view styling category for a single-message group.
-function map_item_cat(ins) {
+// Styling category for a command (shared by map view and APDU list).
+function command_cat(ins) {
     if (ins === '12') return 'proactive';                    // FETCH
     if (ins === '14' || ins === '10' || ins === 'aa') return 'tr';  // TERMINAL RESPONSE / PROFILE / CAPABILITY
     if (ins === 'c2') return 'envelope';                     // ENVELOPE
     if (ins === '88' || ins === '89') return 'auth';         // AUTHENTICATE
-    return 'other';
+    return null;
 }
 
 function buildTraceMap() {
@@ -1134,7 +1142,7 @@ function buildTraceMap() {
             groups.push({ label: 'STATUS: ' + (j - i), cat: 'status', start: i, end: j - 1 });
             i = j;
         } else {
-            groups.push({ label: map_other_label(msgs[i]), cat: map_item_cat(ins), start: i, end: i });
+            groups.push({ label: map_other_label(msgs[i]), cat: command_cat(ins), start: i, end: i });
             i++;
         }
     }
@@ -1299,7 +1307,9 @@ function renderMessages(skipScroll) {
             </div>`;
         }
         const label = ins_label(m);
-        const typeCls = m.type === 'atr' ? 'atr' : m.type === 'pps' ? 'pps' : '';
+        const cat = command_cat(_ins_hex(m));
+        const typeCls = (m.type === 'atr' ? 'atr' : m.type === 'pps' ? 'pps' : '') +
+            (cat ? ' cat-' + cat : '');
         const errs = error_names(m);
         const errBadge = errs ? `<span class="apdu-err" title="${errs.join(', ')}">⚠</span>` : '';
         return `<div class="apdu-entry" data-idx="${idx}">
