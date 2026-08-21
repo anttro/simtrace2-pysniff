@@ -7,6 +7,32 @@ that both captures APDU traffic and serves that PWA.
 
 **Single dependency**: PyUSB (libusb wrapper). No libosmocore, no libosmosim.
 
+## Features
+
+**APDU decoder** (server-side, rendered by the PWA):
+
+- Full APDU decode — CLA per ISO 7816-4 / ETSI coding (logical channel,
+  secure messaging, command chaining), INS names from a spec table,
+  SFI-aware P1/P2 for READ/UPDATE BINARY and record commands
+- Status words — full ISO 7816-4 set plus UICC-specific values:
+  `91XX` (proactive command pending), `62F1/F2/F3`, `63F1/F2` (more data),
+  `9300` (SAT busy), `9850`, `9862–64`
+- SIM Toolkit (CAT) — proactive commands with decoded qualifiers,
+  TERMINAL RESPONSE, ENVELOPE (Menu Selection, Call Control, SMS-PP download…)
+- SMS TPDU — SMS-DELIVER/SUBMIT, SCTS timestamps, UDH information elements
+- SCP80 OTA secured packets — SPI bits (ciphering, PoR requirement/mode,
+  RC/CC/DS, counter), KIc/KID algorithm + key set, TAR, CNTR/PCNTR;
+  Response Packet (PoR) decode on GET RESPONSE
+- ATR parse (clock-rate conversion, Fi/Di, T-bitmask) and FCP/FCI TLV
+
+**simtrace-analyser PWA** ([`frontend/`](frontend/)):
+
+- Trace view with Map/List modes — proactive, TERMINAL RESPONSE, ENVELOPE
+  and AUTH commands get distinctive styling in map view
+- Sessions with deep links (`#session=N`), PCAP import (`.pcap/.pcapng/.cap`),
+  search and type filtering
+- Installable PWA, dark theme, English/Russian UI
+
 ## Prerequisites
 
 - **Python 3.9+**
@@ -64,7 +90,7 @@ FORMAT=timestamp GSMTAP=127.0.0.1 ./sniff-start.sh
 ### Analysis server + PWA (`simtrace2-pysniff-server`)
 
 Stores captured APDU traffic in SQLite and serves it over HTTP, together with
-the bundled **simtrace-analyser** PWA (`frontend/`) on the same origin.  Two
+the bundled **simtrace-analyser** PWA (`frontend/`) on the same origin.  Three
 capture modes:
 
 ```sh
@@ -73,6 +99,20 @@ simtrace2-pysniff-server --capture gsmtap
 
 # Capture directly from SIMtrace2 hardware (no external tool needed):
 simtrace2-pysniff-server --capture direct
+
+# Browse/analyse existing captures without a capture backend:
+simtrace2-pysniff-server --capture disabled
+```
+
+Server options:
+
+```
+--host ADDR          HTTP bind address (default: 127.0.0.1)
+--port PORT          HTTP server port (default: 8081)
+--db FILE            SQLite database path (default: ~/.simtrace-analyser/sessions.db)
+--capture MODE       gsmtap | direct | disabled  (default: gsmtap)
+--gsmtap-port PORT   UDP port for the GSMTAP listener (default: 4729)
+--web-dir PATH       PWA static files directory (default: <repo>/frontend)
 ```
 
 Then open **http://127.0.0.1:8081/** in a browser — the PWA is served by the
@@ -154,6 +194,9 @@ python -m simtrace2_pysniff [OPTIONS]
 
 Recovery options:
   --no-reconnect            Exit on USB disconnect instead of reconnecting
+  --reconnect-delay-min SEC Minimum reconnect delay (default: 1.0)
+  --reconnect-delay-max SEC Maximum reconnect delay cap (default: 30.0)
+  --backoff-factor N        Exponential backoff multiplier (default: 1.5)
   --inactivity-timeout SEC  Reconnect after N seconds of silence (default: disabled)
 ```
 
