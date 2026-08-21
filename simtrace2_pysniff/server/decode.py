@@ -8,20 +8,22 @@ the SIMtrace2 sniffer into structured dicts for the PWA to display.
 
 SW_NAMES = {
     (0x90, 0x00): 'Normal ending',
-    (0x91, 0x00): 'Normal ending, proactive command pending',
-    (0x92, 0x00): 'Normal ending after x bytes',
     (0x61, 0x00): 'Response data available',
     (0x62, 0x00): 'Warning — no information',
     (0x62, 0x81): 'Warning — part of data may be corrupted',
     (0x62, 0x82): 'Warning — EOF reached before reading Le bytes',
     (0x62, 0x83): 'Warning — selected file deactivated',
     (0x62, 0x84): 'Warning — FCI not formatted per ISO',
+    (0x62, 0x85): 'Warning — selected file in termination state',
+    (0x62, 0xf1): 'More data available',
+    (0x62, 0xf2): 'More data available and proactive command pending',
+    (0x62, 0xf3): 'Response data available',
     (0x63, 0x00): 'Warning — no information',
-    (0x63, 0xc1): 'Warning — 1 retry remaining',
-    (0x63, 0xc2): 'Warning — 2 retries remaining',
-    (0x63, 0xc3): 'Warning — 3 retries remaining',
+    (0x63, 0xf1): 'More data expected',
+    (0x63, 0xf2): 'More data expected and proactive command pending',
     (0x64, 0x00): 'Execution error — no information',
-    (0x65, 0x00): 'Execution error — memory failure',
+    (0x64, 0x01): 'Execution error — immediate response required',
+    (0x65, 0x00): 'Execution error — no information, NV memory changed',
     (0x65, 0x81): 'Execution error — memory failure',
     (0x66, 0x00): 'Security error — no information',
     (0x66, 0x81): 'Reserved for security-related issues',
@@ -40,6 +42,7 @@ SW_NAMES = {
     (0x69, 0x86): 'Command not allowed (no current EF)',
     (0x69, 0x87): 'Expected SM data objects missing',
     (0x69, 0x88): 'SM data objects incorrect',
+    (0x69, 0x89): 'Command not allowed — secure channel security not satisfied',
     (0x6a, 0x00): 'Checking error — no information',
     (0x6a, 0x80): 'Incorrect data in command data',
     (0x6a, 0x81): 'Function not supported',
@@ -56,6 +59,11 @@ SW_NAMES = {
     (0x6d, 0x00): 'Instruction not supported or invalid',
     (0x6e, 0x00): 'Class not supported',
     (0x6f, 0x00): 'No precise diagnosis',
+    (0x93, 0x00): 'SIM Application Toolkit busy',
+    (0x98, 0x50): 'INCREASE cannot be performed, max value reached',
+    (0x98, 0x62): 'Authentication error, application specific',
+    (0x98, 0x63): 'Security session or association expired',
+    (0x98, 0x64): 'Minimum UICC suspension time too long',
 }
 
 
@@ -63,15 +71,17 @@ def _sw_name(sw1, sw2):
     key = (sw1, sw2)
     return SW_NAMES.get(key)
 
-# pattern match: 63cx, 62xx, etc.
-_SW_PATTERNS = {
-    (0x63,): lambda s1, s2: ('PIN verification failed, %d retries remaining' % (s2 & 0x0f)
-                              if s2 & 0xc0 == 0xc0 else None),
-    (0x61,): lambda s1, s2: 'Response: %d bytes available (use GET RESPONSE)' % s2,
-    (0x6c,): lambda s1, s2: 'Wrong length (Le): correct length is 0x%02X (%d bytes)' % (s2, s2),
-    (0x9e,): lambda s1, s2: 'Normal processing, %d bytes of response' % s2,
-    (0x9f,): lambda s1, s2: 'Normal processing, %d bytes of response' % s2,
-}
+# pattern match: 91xx, 63cx, etc.
+_SW_PATTERNS = [
+    ((0x91,), lambda s1, s2: 'Proactive command pending (%d bytes)' % s2),
+    ((0x92,), lambda s1, s2: 'Normal ending, TRANSACT DATA info (0x%02X)' % s2),
+    ((0x61,), lambda s1, s2: 'Response: %d bytes available (use GET RESPONSE)' % s2),
+    ((0x63,), lambda s1, s2: ('Verification failed, %d retries remaining' % (s2 & 0x0f)
+                              if s2 & 0xc0 == 0xc0 else None)),
+    ((0x6c,), lambda s1, s2: 'Wrong length (Le): correct length is 0x%02X (%d bytes)' % (s2, s2)),
+    ((0x9e,), lambda s1, s2: 'Normal processing, %d bytes of response' % s2),
+    ((0x9f,), lambda s1, s2: 'Normal processing, %d bytes of response' % s2),
+]
 
 
 def decode_sw(raw_sw):
@@ -80,17 +90,11 @@ def decode_sw(raw_sw):
     sw1, sw2 = raw_sw[-2], raw_sw[-1]
     name = _sw_name(sw1, sw2)
     if name is None:
-        for keys, fn in _SW_PATTERNS.items():
-            if len(keys) == 1:
-                if sw1 == keys[0]:
-                    name = fn(sw1, sw2)
-                    if name:
-                        break
-            elif len(keys) == 2:
-                if sw1 == keys[0]:
-                    name = fn(sw1, sw2)
-                    if name:
-                        break
+        for keys, fn in _SW_PATTERNS:
+            if sw1 == keys[0]:
+                name = fn(sw1, sw2)
+                if name:
+                    break
     return {
         'sw1': f'{sw1:02x}',
         'sw2': f'{sw2:02x}',
@@ -101,23 +105,44 @@ def decode_sw(raw_sw):
 # ──────────────────── CLA byte ────────────────────
 
 def decode_cla(cla):
-    chain_bits = (cla >> 4) & 0x03
-    chain_names = {0: 'last or only', 1: 'first in chain', 2: 'not last in chain', 3: 'not last'}
     if cla == 0x80:
         interclass = 'ETSI-defined (UICC/USIM)'
     elif cla == 0xa0:
         interclass = 'ETSI-defined (SIM/GSM)'
-    elif cla == 0x00:
+    elif cla & 0x80:
+        interclass = 'proprietary'
+    elif (cla >> 6) & 0x03 == 0x00:
         interclass = 'inter-industry (ISO 7816-4)'
+    elif (cla >> 6) & 0x03 == 0x01:
+        interclass = 'inter-industry (further format)'
     else:
-        interclass = 'inter-industry' if (cla & 0x80) == 0 else 'proprietary'
-    result = {
-        'hex': f'{cla:02x}',
-        'interclass': interclass,
-        'channel': cla & 0x03,
-        'secure_messaging': 'none' if (cla & 0x0c) == 0 else 'present',
-        'chain': chain_names.get(chain_bits, f'unknown ({chain_bits})'),
-    }
+        interclass = 'reserved'
+    if cla & 0x80:
+        # proprietary / ETSI-defined: no standard SM/chaining/channel coding
+        result = {
+            'hex': f'{cla:02x}',
+            'interclass': interclass,
+            'channel': cla & 0x03,
+            'secure_messaging': 'none',
+            'chain': 'last or only',
+        }
+    else:
+        # ISO 7816-4 §5.1.1 first/further interindustry
+        chain_bit = (cla >> 5) & 0x01
+        chain_names = {0: 'last or only', 1: 'first or continuing'}
+        sm_names = {0: 'none', 1: 'proprietary', 2: 'SM header not authenticated',
+                    3: 'SM header authenticated'}
+        sm_ind = (cla >> 3) & 0x03
+        channel = cla & 0x03
+        if (cla >> 6) & 0x03 == 0x01:
+            channel += 4  # further format: b4-b1 = channel + 4
+        result = {
+            'hex': f'{cla:02x}',
+            'interclass': interclass,
+            'channel': channel,
+            'secure_messaging': sm_names.get(sm_ind, 'none'),
+            'chain': chain_names.get(chain_bit, 'last or only'),
+        }
     return result
 
 
@@ -594,6 +619,37 @@ APDU_SPEC = {
         'p1p2': {'fmt': 'uint16be', 'label': 'Offset'},
         'body': {'label': 'Data'},
     },
+    0xD7: {
+        'name': 'UPDATE BINARY (odd INS)',
+        'p1p2': {'fmt': 'uint16be', 'label': 'Offset'},
+        'body': {'label': 'BER-TLV data'},
+    },
+    0xDD: {
+        'name': 'UPDATE RECORD (odd INS)',
+        'p1': {'fmt': 'uint8', 'label': 'Record number'},
+        'p2': {
+            'label': 'Mode',
+            'bits': {
+                0x02: 'next record',
+                0x03: 'previous record',
+                0x04: 'absolute mode (record number in P1)',
+            },
+        },
+        'body': {'label': 'BER-TLV data'},
+    },
+    0xD2: {
+        'name': 'WRITE RECORD',
+        'p1': {'fmt': 'uint8', 'label': 'Record number'},
+        'p2': {
+            'label': 'Mode',
+            'bits': {
+                0x02: 'next record',
+                0x03: 'previous record',
+                0x04: 'absolute mode (record number in P1)',
+            },
+        },
+        'body': {'label': 'Data'},
+    },
     0xDC: {
         'name': 'UPDATE RECORD',
         'p1': {'fmt': 'uint8', 'label': 'Record number'},
@@ -658,6 +714,28 @@ APDU_SPEC = {
         'name': 'AUTHENTICATE',
         'body': {'label': 'Response/resynchronisation data'},
     },
+    0x82: {
+        'name': 'EXTERNAL AUTHENTICATE',
+        'p1': {'label': 'Security level'},
+        'p2': {0x00: 'No indication'},
+        'body': {'label': 'Cryptogram'},
+    },
+    0x86: {
+        'name': 'GENERAL AUTHENTICATE',
+        'p1p2': {'unused': True},
+        'body': {'label': 'Auth data'},
+    },
+    0x87: {
+        'name': 'GENERAL AUTHENTICATE (odd INS)',
+        'p1p2': {'unused': True},
+        'body': {'label': 'BER-TLV auth data'},
+    },
+    0x22: {
+        'name': 'MANAGE SECURITY ENVIRONMENT',
+        'p1': {0x00: 'No indication', 0x01: 'Set', 0x02: 'Verify', 0x03: 'Restore', 0xF3: 'Erase'},
+        'p2': {'label': 'SE reference'},
+        'body': {'label': 'SE parameters'},
+    },
     0x84: {
         'name': 'GET CHALLENGE',
         'le': True,
@@ -708,6 +786,29 @@ APDU_SPEC = {
         'p1': {0x00: 'EF by file ID', 0x08: 'Path from MF', 0x09: 'Path from current DF'},
         'p2': {0x00: 'No indication'},
         'body': {'label': 'File ID/path'},
+    },
+    0x0E: {
+        'name': 'ERASE BINARY',
+        'p1p2': {'fmt': 'uint16be', 'label': 'Offset'},
+        'body': {'label': 'Erase data'},
+    },
+    0x0C: {
+        'name': 'ERASE RECORDS',
+        'p1': {'fmt': 'uint8', 'label': 'Record number'},
+        'p2': {
+            'label': 'Mode',
+            'bits': {
+                0x02: 'next record',
+                0x03: 'previous record',
+                0x04: 'absolute mode (record number in P1)',
+            },
+        },
+        'body': None,
+    },
+    0x7C: {
+        'name': 'MANAGE LSI',
+        'p1p2': {'unused': True},
+        'body': {'label': 'LSI parameters'},
     },
     0xF2: {
         'name': 'STATUS',
@@ -1905,11 +2006,12 @@ def _decode_secured_packet(body):
         'spi': {
             'hex': spi.hex().upper(),
             'counter': _OTA_COUNTER.get((spi1 >> 4) & 0x03, 'reserved'),
-            'ciphering': bool(spi1 & 0x08),
+            'ciphering': bool(spi1 & 0x04),
             'rc_cc_ds': _OTA_RC_CC_DS.get(rc_cc_ds_kind, 'reserved'),
             'por': _OTA_POR.get(spi2 & 0x03, 'reserved'),
             'por_rc_cc_ds': _OTA_RC_CC_DS.get((spi2 >> 2) & 0x03, 'reserved'),
-            'por_ciphered': bool(spi2 & 0x20),
+            'por_ciphered': bool(spi2 & 0x10),
+            'por_transport': 'SMS-DELIVER-REPORT' if not (spi2 & 0x20) else 'SMS-SUBMIT',
         },
         'kic': {'key': kic >> 4, 'algo': _KIC_ALGO.get(kic & 0x0F, 'reserved')},
         'tar': tar.hex().upper(),
@@ -1918,7 +2020,7 @@ def _decode_secured_packet(body):
         'data': data.hex().upper(),
     }
     kic_algo = _KIC_ALGO.get(kic & 0x0F, 'reserved')
-    if not (spi1 & 0x08):  # SPI says no ciphering → KIc unused
+    if not (spi1 & 0x04):  # SPI says no ciphering → KIc unused
         kic_algo += ' (unused)'
     result['kic'] = {'key': kic >> 4, 'algo': kic_algo}
     if rc_cc_ds_kind == 2:  # CC

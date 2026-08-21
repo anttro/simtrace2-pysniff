@@ -1545,5 +1545,177 @@ class TestRefresh(unittest.TestCase):
         self.assertEqual(r['cmd']['file_list'], ['6F07', '6F20'])
 
 
+class TestSwUiccSpecific(unittest.TestCase):
+    """TS 102 221 UICC-specific SWs (tables 10.7-10.15)."""
+
+    def _sw(self, hexstr):
+        from simtrace2_pysniff.server.decode import decode_sw
+        return decode_sw(bytes.fromhex(hexstr))
+
+    def test_91xx_proactive_pending(self):
+        self.assertEqual(self._sw('9107')['name'],
+                         'Proactive command pending (7 bytes)')
+        self.assertEqual(self._sw('910b')['name'],
+                         'Proactive command pending (11 bytes)')
+
+    def test_62f_more_data(self):
+        self.assertEqual(self._sw('62f1')['name'], 'More data available')
+        self.assertEqual(self._sw('62f2')['name'],
+                         'More data available and proactive command pending')
+        self.assertEqual(self._sw('62f3')['name'], 'Response data available')
+
+    def test_63f_not_pin_failure(self):
+        # 63F1/F2 are "more data expected", NOT PIN retries
+        self.assertEqual(self._sw('63f1')['name'], 'More data expected')
+        self.assertEqual(self._sw('63f2')['name'],
+                         'More data expected and proactive command pending')
+
+    def test_63cx_still_pin_retries(self):
+        self.assertIn('retries remaining', self._sw('63c3')['name'])
+        self.assertIn('Verification failed', self._sw('63c3')['name'])
+
+    def test_sat_busy_and_auth_errors(self):
+        self.assertEqual(self._sw('9300')['name'], 'SIM Application Toolkit busy')
+        self.assertEqual(self._sw('9850')['name'],
+                         'INCREASE cannot be performed, max value reached')
+        self.assertEqual(self._sw('9862')['name'],
+                         'Authentication error, application specific')
+        self.assertEqual(self._sw('9863')['name'],
+                         'Security session or association expired')
+        self.assertEqual(self._sw('9864')['name'],
+                         'Minimum UICC suspension time too long')
+
+    def test_6401_immediate_response(self):
+        self.assertEqual(self._sw('6401')['name'],
+                         'Execution error — immediate response required')
+
+    def test_6500_nv_memory_changed(self):
+        # TS 102 221 table 10.10: 6500 = no info given, NV memory CHANGED
+        name = self._sw('6500')['name']
+        self.assertIn('NV memory changed', name)
+        self.assertNotEqual(name, 'Execution error — memory failure')
+
+    def test_existing_patterns_intact(self):
+        self.assertIn('GET RESPONSE', self._sw('6110')['name'])
+        self.assertIn('correct length is 0x38', self._sw('6c38')['name'])
+        self.assertIsNone(self._sw('6205')['name'])
+
+
+class TestSpiBits(unittest.TestCase):
+    """TS 102 225 §5.1.1: SPI1 b3 = ciphering, SPI2 b5 = PoR ciphering."""
+
+    def _spi(self, spi_hex):
+        from simtrace2_pysniff.server.decode import _decode_secured_packet
+        # CPL(2) CHL(1)=0x0D SPI(2) KIc KID TAR(3) CNTR(5) PCNTR + 1 data byte
+        body = bytes.fromhex('000d0d' + spi_hex + '1505000001000000000000aa')
+        return _decode_secured_packet(body)['spi']
+
+    def test_spi1_ciphering_b3(self):
+        # 0x16 = 0001 0110: b3=1 → ciphering ON; old code checked b4 (0x08) → False
+        self.assertTrue(self._spi('1605')['ciphering'])
+        # 0x12 = 0001 0010: b3=0 → ciphering OFF
+        self.assertFalse(self._spi('1205')['ciphering'])
+        # 0x04 = 0000 0100: only b3 set → ciphering ON
+        self.assertTrue(self._spi('0405')['ciphering'])
+
+    def test_spi2_por_ciphered_b5(self):
+        # 0x10 = 0001 0000: b5=1 → PoR ciphered; old code checked b6 (0x20) → False
+        self.assertTrue(self._spi('0510')['por_ciphered'])
+        # 0x20 = 0010 0000: b6=0... wait, b5=0 → NOT ciphered
+        self.assertFalse(self._spi('0520')['por_ciphered'])
+
+    def test_por_transport_field(self):
+        # TS 31.115: SPI2 b6 (0x20) = PoR transport (0 = SMS-DELIVER-REPORT, 1 = SMS-SUBMIT)
+        self.assertEqual(self._spi('0500')['por_transport'], 'SMS-DELIVER-REPORT')
+        self.assertEqual(self._spi('0520')['por_transport'], 'SMS-SUBMIT')
+
+
+class TestApduSpecCoverage(unittest.TestCase):
+    """Newly added APDU_SPEC entries decode with names."""
+
+    def _ins(self, cla, ins, p1p2='0000', body='', le=''):
+        raw = bytes.fromhex(cla + ins + p1p2 + '%02x' % (len(body) // 2) + body + le)
+        return decode_message(raw)['ins_name']
+
+    def test_update_binary_odd_ins(self):
+        r = self._ins('00', 'd7', '0010', 'aabb')
+        self.assertEqual(r, 'UPDATE BINARY (odd INS)')
+
+    def test_update_record_odd_ins(self):
+        r = self._ins('00', 'dd', '0104', 'aabb')
+        self.assertEqual(r, 'UPDATE RECORD (odd INS)')
+
+    def test_write_record(self):
+        r = self._ins('00', 'd2', '0104', 'aabb')
+        self.assertEqual(r, 'WRITE RECORD')
+
+    def test_external_authenticate(self):
+        r = self._ins('00', '82', '0100', 'aabbccdd')
+        self.assertEqual(r, 'EXTERNAL AUTHENTICATE')
+
+    def test_general_authenticate(self):
+        r = self._ins('00', '86', '0000', '7c0aa50401020304')
+        self.assertEqual(r, 'GENERAL AUTHENTICATE')
+
+    def test_manage_security_environment(self):
+        r = self._ins('00', '22', '41a4', '')
+        self.assertEqual(r, 'MANAGE SECURITY ENVIRONMENT')
+
+    def test_erase_binary(self):
+        r = self._ins('00', '0e', '0010', '0020')
+        self.assertEqual(r, 'ERASE BINARY')
+
+    def test_erase_records(self):
+        r = self._ins('00', '0c', '0304', '')
+        self.assertEqual(r, 'ERASE RECORDS')
+
+    def test_manage_lsi(self):
+        r = self._ins('80', '7c', '0000', '0201')
+        self.assertEqual(r, 'MANAGE LSI')
+
+
+class TestClaDecode(unittest.TestCase):
+    """ISO 7816-4 §5.1.1 first/further interindustry CLA coding."""
+
+    def _cla(self, value):
+        from simtrace2_pysniff.server.decode import decode_cla
+        return decode_cla(value)
+
+    def test_basic_channel_iso(self):
+        r = self._cla(0x00)
+        self.assertEqual(r['channel'], 0)
+        self.assertEqual(r['secure_messaging'], 'none')
+        self.assertEqual(r['chain'], 'last or only')
+
+    def test_sm_header_authenticated(self):
+        # 0x1C = 0001 1100: SM bits b4-b3 = 11 → header authenticated
+        r = self._cla(0x1c)
+        self.assertEqual(r['secure_messaging'], 'SM header authenticated')
+
+    def test_sm_proprietary(self):
+        # 0x0C = 0000 1100: b4-b3 = 01 → proprietary secure messaging
+        r = self._cla(0x0c)
+        self.assertEqual(r['secure_messaging'], 'proprietary')
+
+    def test_chain_bit_b5(self):
+        # 0x20 = 0010 0000: b5=1 → first or continuing command of chain
+        r = self._cla(0x20)
+        self.assertEqual(r['chain'], 'first or continuing')
+
+    def test_further_interindustry_channel_offset(self):
+        # 0x40 = 0100 0000: further format, channel = b4-b1 + 4 = 4
+        r = self._cla(0x40)
+        self.assertEqual(r['interclass'], 'inter-industry (further format)')
+        self.assertEqual(r['channel'], 4)
+
+    def test_etsi_uicc(self):
+        r = self._cla(0x80)
+        self.assertEqual(r['interclass'], 'ETSI-defined (UICC/USIM)')
+
+    def test_etsi_sim(self):
+        r = self._cla(0xa0)
+        self.assertEqual(r['interclass'], 'ETSI-defined (SIM/GSM)')
+
+
 if __name__ == '__main__':
     unittest.main()
