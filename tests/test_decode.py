@@ -101,7 +101,7 @@ class TestCatDecoding(unittest.TestCase):
         self.assertEqual(r['cat_command'], 'SMS-PP DOWNLOAD')
         cmd = r['cmd']
         self.assertEqual(cmd['smsc'], '+79043490004')
-        self.assertEqual(cmd['device_ids'], '8381')
+        self.assertEqual(cmd['device_ids'], {'src': 'Network', 'dst': 'UICC'})
         t = cmd['tpdu']
         self.assertEqual(t['mti'], 'SMS-DELIVER')
         self.assertEqual(t['oa'], '455')
@@ -355,8 +355,8 @@ class TestTrResult(unittest.TestCase):
 
     def test_session_terminated(self):
         from simtrace2_pysniff.server.decode import _decode_tr_result
-        r = _decode_tr_result(bytes.fromhex('81030105000202828103010A'))
-        self.assertEqual(r['code'], '0x0A')
+        r = _decode_tr_result(bytes.fromhex('810301050002028281030110'))
+        self.assertEqual(r['code'], '0x10')
         self.assertEqual(r['name'], 'Proactive UICC session terminated by the user')
 
 
@@ -1590,6 +1590,193 @@ class TestIdleModeText(unittest.TestCase):
     def test_no_icon_tlv(self):
         r = self._fetch('8103012800820281828d060448656c6c6f')
         self.assertNotIn('icon_id', r['cmd'])
+
+
+class TestSatLegacyQuirks(unittest.TestCase):
+    """Real-card SAT quirks and unknown-TLV transparency.
+
+    Tag assignments verified against GSM 11.14 v5.1.0/v5.9.0 §12.3 and
+    TS 102 223 V18.3.0: Text String = '0D'/'8D' in all generations;
+    '10'/'90' = Item identifier.
+    """
+
+    def _fetch(self, inner_hex):
+        inner = bytes.fromhex(inner_hex)
+        body = b'\xd0' + bytes([len(inner)]) + inner
+        return decode_message(
+            bytes.fromhex('80120000%02x' % len(body)) + body + b'\x90\x00')
+
+    def test_idle_mode_text_nonstandard_tag(self):
+        # Real-card capture: SET UP IDLE MODE TEXT whose Text String ("037",
+        # 8-bit data) is tagged '10' instead of '8D'.
+        r = decode_message(bytes.fromhex(
+            '8012000011d00f8103012800820281821004043033379000'))
+        self.assertEqual(r['cat_command'], 'SET UP IDLE MODE TEXT')
+        self.assertEqual(r['cmd']['text'], '037')
+        self.assertIn('non-standard', r['cmd']['text_note'])
+        self.assertNotIn('raw_tlv', r['cmd'])
+
+    def test_item_identifier_single_byte(self):
+        # Genuine 1-byte Item identifier (SELECT ITEM flow) must not be
+        # mistaken for the quirk text fallback.
+        r = self._fetch('810301240082028182900102')
+        self.assertEqual(r['cat_command'], 'SELECT ITEM')
+        self.assertEqual(r['cmd']['item_id'], 2)
+        self.assertNotIn('text', r['cmd'])
+
+    def test_unknown_tlv_preserved(self):
+        r = self._fetch('8103012800820281827102aabb')
+        self.assertEqual(r['cmd']['raw_tlv'],
+                         [{'tag': '71', 'value': 'AABB'}])
+
+    def test_device_ids_not_in_raw_tlv(self):
+        # Structural Device Identities TLV must not surface as unknown.
+        r = self._fetch('810301280082028182')
+        self.assertNotIn('raw_tlv', r['cmd'])
+
+    def test_compliant_text_still_wins_over_quirk(self):
+        # If both a compliant 8D text and a '10'-tagged object exist,
+        # the compliant one is used and the other lands in raw_tlv.
+        r = self._fetch('8103012100820281828d0204411003010102')
+        self.assertEqual(r['cmd']['text'], 'A')
+        self.assertIn({'tag': '10', 'value': '010102'}, r['cmd']['raw_tlv'])
+
+
+class TestSpecRegistry(unittest.TestCase):
+    """Registries verified against TS 102 223 V18.3.0 / TS 31.111 V18.12.0."""
+
+    def _fetch(self, inner_hex):
+        inner = bytes.fromhex(inner_hex)
+        body = b'\xd0' + bytes([len(inner)]) + inner
+        return decode_message(
+            bytes.fromhex('80120000%02x' % len(body)) + body + b'\x90\x00')
+
+    def test_event_names_multi_rat_and_profile_container(self):
+        # SET UP EVENT LIST with events '14', '19', '1E'
+        from simtrace2_pysniff.server.decode import EVENT_TYPES
+        self.assertEqual(EVENT_TYPES[0x14],
+                         'Access Technology Change (multiple)')
+        self.assertEqual(EVENT_TYPES[0x19], 'Profile Container')
+        self.assertEqual(EVENT_TYPES[0x1E], 'CAG cell selection')
+        self.assertEqual(EVENT_TYPES[0x1F], 'Slices Status Change')
+
+    def test_event_list_fetch_decodes_new_events(self):
+        # SET UP EVENT LIST with events '14', '19', '1E'
+        r = self._fetch('810301050002028281190314191e')
+        self.assertEqual(r['cat_command'], 'SET UP EVENT LIST')
+        self.assertEqual(r['cmd']['events'],
+                         ['Access Technology Change (multiple)',
+                          'Profile Container', 'CAG cell selection'])
+
+    def test_tr_result_me_unable_vs_network(self):
+        from simtrace2_pysniff.server.decode import TR_RESULTS
+        self.assertIn('ME currently unable', TR_RESULTS[0x20])
+        self.assertIn('Network currently unable', TR_RESULTS[0x21])
+
+    def test_tr_result_user_session_codes(self):
+        from simtrace2_pysniff.server.decode import TR_RESULTS
+        self.assertEqual(TR_RESULTS[0x14],
+                         'USSD or SS transaction terminated by the user')
+        self.assertNotIn(0x0A, TR_RESULTS)
+        self.assertNotIn(0x0E, TR_RESULTS)
+
+    def test_tr_result_permanent_problems(self):
+        from simtrace2_pysniff.server.decode import TR_RESULTS
+        self.assertEqual(TR_RESULTS[0x3A],
+                         'Bearer Independent Protocol error')
+        self.assertEqual(TR_RESULTS[0x3B],
+                         'Access Technology unable to process command')
+        self.assertEqual(TR_RESULTS[0x3C], 'Frames error')
+        self.assertEqual(TR_RESULTS[0x3D], 'MMS error')
+
+    def test_envelope_types_extended(self):
+        from simtrace2_pysniff.server.decode import ENVELOPE_TYPES
+        self.assertEqual(ENVELOPE_TYPES[0xD9], 'USSD DOWNLOAD')
+        self.assertEqual(ENVELOPE_TYPES[0xDD],
+                         'GEOGRAPHICAL LOCATION REPORTING')
+        self.assertEqual(ENVELOPE_TYPES[0xDE], 'ENVELOPE CONTAINER')
+        self.assertEqual(ENVELOPE_TYPES[0xE0], '5G PROSE REPORT')
+
+    def test_lsi_command_type(self):
+        from simtrace2_pysniff.server.decode import CAT_COMMAND_TYPES
+        self.assertEqual(CAT_COMMAND_TYPES[0x79], 'LSI COMMAND')
+
+    def test_proprietary_type_fallback(self):
+        r = self._fetch('810301f20082028182')
+        self.assertEqual(r['cat_command'], 'Proprietary (0xf2)')
+        self.assertEqual(r['cmd']['type'], 'Proprietary (0xf2)')
+
+    def test_pli_qualifiers_esn_and_supported_rat(self):
+        from simtrace2_pysniff.server.decode import PLI_QUALIFIERS
+        self.assertEqual(PLI_QUALIFIERS[0x07], 'ESN of the terminal')
+        self.assertEqual(PLI_QUALIFIERS[0x1A],
+                         'Supported Radio Access Technologies')
+
+
+class TestEnvelopeDecoders(unittest.TestCase):
+    """Phase 2: inner TLV decoding for the remaining ENVELOPE types."""
+
+    def _envelope(self, hexstr):
+        apdu = '80C20000%02x' % (len(hexstr) // 2) + hexstr + '9000'
+        return decode_message(bytes.fromhex(apdu))
+
+    def test_menu_selection_item_and_help(self):
+        # D3 | device ids (UICC→Terminal) | item identifier 02 | help request
+        r = self._envelope('D309820281821001029500')
+        cmd = r['cmd']
+        self.assertEqual(cmd['type'], 'MENU SELECTION')
+        self.assertEqual(cmd['item_id'], 2)
+        self.assertTrue(cmd['help'])
+        self.assertEqual(cmd['device_ids'], {'src': 'UICC', 'dst': 'Terminal'})
+
+    def test_timer_expiration(self):
+        # D7 | device ids | timer id 01 | timer value semi-octet h/m/s
+        r = self._envelope('D70C820282812401012503010203')
+        cmd = r['cmd']
+        self.assertEqual(cmd['type'], 'TIMER EXPIRATION')
+        self.assertEqual(cmd['timer_id'], 1)
+        self.assertEqual(cmd['timer_value'], '01:02:03')
+
+    def test_ussd_download(self):
+        # D9 | device ids | USSD string, DCS 0x04 (8-bit) "*100#"
+        r = self._envelope('D90C820283810A06042A31303023')
+        cmd = r['cmd']
+        self.assertEqual(cmd['type'], 'USSD DOWNLOAD')
+        self.assertEqual(cmd['ussd'], '*100#')
+        self.assertEqual(cmd['device_ids'], {'src': 'Network', 'dst': 'UICC'})
+
+    def test_call_control_address_and_ccp(self):
+        # D4 | device ids | address (intl '+79') | CCP 0xAA
+        r = self._envelope('D40C8202838106039179F10701AA')
+        cmd = r['cmd']
+        self.assertEqual(cmd['type'], 'CALL CONTROL')
+        self.assertIn('+', cmd['address'])
+        self.assertEqual(cmd['ccp'], 'AA')
+
+    def test_envelope_container_recurses(self):
+        # DE wrapping a complete MENU SELECTION envelope
+        inner = bytes.fromhex('D309820281821001029500')
+        body = b'\xDE' + bytes([len(inner)]) + inner
+        lc = len(body)
+        r = decode_message(
+            bytes.fromhex('80C20000%02x' % lc) + body + b'\x90\x00')
+        cmd = r['cmd']
+        self.assertEqual(cmd['type'], 'ENVELOPE CONTAINER')
+        self.assertEqual(cmd['encapsulated']['type'], 'MENU SELECTION')
+        self.assertEqual(cmd['encapsulated']['item_id'], 2)
+
+    def test_prose_report_keeps_raw_objects(self):
+        # E0 | device ids | unknown data object → preserved in raw_tlv
+        r = self._envelope('E008820282819902AABB')
+        cmd = r['cmd']
+        self.assertEqual(cmd['type'], '5G PROSE REPORT')
+        self.assertEqual(cmd['raw_tlv'], [{'tag': '19', 'value': 'AABB'}])
+
+    def test_proactive_device_ids_decoded(self):
+        r = decode_message(bytes.fromhex(
+            '801200000dd00b8103012800820283818d00'))
+        self.assertEqual(r['cmd']['device_ids'],
+                         {'src': 'Network', 'dst': 'UICC'})
 
 
 class TestSwUiccSpecific(unittest.TestCase):

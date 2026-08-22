@@ -17,8 +17,10 @@ that both captures APDU traffic and serves that PWA.
 - Status words — full ISO 7816-4 set plus UICC-specific values:
   `91XX` (proactive command pending), `62F1/F2/F3`, `63F1/F2` (more data),
   `9300` (SAT busy), `9850`, `9862–64`
-- SIM Toolkit (CAT) — proactive commands with decoded qualifiers,
-  TERMINAL RESPONSE, ENVELOPE (Menu Selection, Call Control, SMS-PP download…)
+- SIM Toolkit — SAT (GSM 11.14), CAT (TS 102 223) and USAT (TS 31.111)
+  proactive commands with decoded qualifiers, TERMINAL RESPONSE, ENVELOPE
+  (Menu Selection, Call Control, SMS-PP download…); tolerates known
+  non-compliant legacy-card quirks and preserves unrecognized TLVs
 - SMS TPDU — SMS-DELIVER/SUBMIT, SCTS timestamps, UDH information elements
 - SCP80 OTA secured packets — SPI bits (ciphering, PoR requirement/mode,
   RC/CC/DS, counter), KIc/KID algorithm + key set, TAR, CNTR/PCNTR;

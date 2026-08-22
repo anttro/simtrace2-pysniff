@@ -956,6 +956,7 @@ CAT_COMMAND_TYPES = {
     0x71: 'CONTACTLESS STATE CHANGED',
     0x72: 'COMMAND CONTAINER',
     0x73: 'ENCAPSULATED SESSION CONTROL',
+    0x79: 'LSI COMMAND',
     0x81: 'END OF PROACTIVE SESSION',
 }
 
@@ -982,6 +983,19 @@ ENVELOPE_TYPES = {
     0xD5: 'MO SHORT MESSAGE CONTROL',
     0xD6: 'EVENT DOWNLOAD',
     0xD7: 'TIMER EXPIRATION',
+    # TS 101 220 table 7.17 + TS 31.111 §9.1
+    0xD9: 'USSD DOWNLOAD',
+    0xDA: 'MMS TRANSFER STATUS',
+    0xDB: 'MMS NOTIFICATION',
+    0xDC: 'TERMINAL APPLICATIONS',
+    0xDD: 'GEOGRAPHICAL LOCATION REPORTING',
+    0xDE: 'ENVELOPE CONTAINER',
+    0xDF: 'PROSE REPORT',
+    0xE0: '5G PROSE REPORT',
+    0xE1: 'Reserved for 3GPP',
+    0xE2: 'Reserved for 3GPP',
+    0xE3: 'Reserved for 3GPP',
+    0xE4: 'GSMA',
 }
 
 
@@ -1027,6 +1041,7 @@ PLI_QUALIFIERS = {
     0x04: 'Language setting',
     0x05: 'Timing Advance',
     0x06: 'Access Technology (single)',
+    0x07: 'ESN of the terminal',
     0x08: 'IMEISV',
     0x09: 'Search Mode',
     0x0A: 'Battery charge state',
@@ -1042,6 +1057,7 @@ PLI_QUALIFIERS = {
     0x15: 'Slices information',
     0x16: 'CAG information list',
     0x17: 'Rejected slices information',
+    0x1A: 'Supported Radio Access Technologies',
 }
 
 
@@ -1095,6 +1111,8 @@ def _command_details_name(value):
     """Decode a Command Details TLV value into the command type name."""
     if len(value) < 2:
         return None
+    if 0xF0 <= value[1] <= 0xFE:  # TS 102 223 §9.4 — reserved for proprietary use
+        return f'Proprietary ({value[1]:#04x})'
     return CAT_COMMAND_TYPES.get(value[1])
 
 
@@ -1157,31 +1175,38 @@ TR_RESULTS = {
     0x07: 'Command performed with modification',
     0x08: 'REFRESH performed but indicated NAA was not active',
     0x09: 'Command performed successfully, tone not played',
-    0x0A: 'Proactive UICC session terminated by the user',
-    0x0B: 'Backward move in the proactive UICC session requested by the user',
-    0x0C: 'No response from user',
-    0x0D: 'Help information required by the user',
-    0x0E: 'USSD/SS transaction terminated by the user',
-    0x10: 'Terminal currently unable to process command (screen busy)',
-    0x11: 'Terminal currently unable to process command (busy on call)',
-    0x12: 'Terminal currently unable to process command (USSD/SS ongoing)',
-    0x13: 'Terminal currently unable to process command (no service)',
-    0x14: 'Terminal currently unable to process command (access control class bar)',
-    0x15: 'Terminal currently unable to process command (radio resource unavailable)',
-    0x20: 'Network currently unable to process command',
-    0x30: 'Beyond terminal capability',
-    0x31: 'Command type not understood by terminal',
-    0x32: 'Command data not understood by terminal',
-    0x33: 'Command number not known by terminal',
+    0x10: 'Proactive UICC session terminated by the user',
+    0x11: 'Backward move in the proactive UICC session requested by the user',
+    0x12: 'No response from user',
+    0x13: 'Help information required by the user',
+    0x14: 'USSD or SS transaction terminated by the user',
+    # TS 102 223 §8.12.1 / TS 31.111: '15'-'16' reserved for 3GPP;
+    # per-cause "terminal unable" details are Additional information
+    # bytes of result '20', not separate general results.
+    0x20: 'ME currently unable to process command',
+    0x21: 'Network currently unable to process command',
+    0x22: 'User did not accept the proactive command',
+    0x23: 'User cleared down call before connection or network release',
+    0x24: 'Action in contradiction with the current timer state',
+    0x25: 'Interaction with call control by NAA, temporary problem',
+    0x26: 'Launch browser generic error',
+    0x27: 'MMS temporary problem',
+    # '28'-'29' reserved for 3GPP
+    0x30: 'Command beyond ME capabilities',
+    0x31: 'Command type not understood by ME',
+    0x32: 'Command data not understood by ME',
+    0x33: 'Command number not known by ME',
     0x34: 'SS Return Error',
     0x35: 'SMS RP-ERROR',
     0x36: 'Error, required values are missing',
-    0x37: 'USSD Return Error',
-    0x38: 'MultipleCard commands error',
-    0x39: 'Interaction with CC by NAA, wrong procedure',
-    0x3C: 'Access Technology unable to process command',
-    0x3D: 'Frames error',
-    0x3E: 'MMS Error',
+    0x37: 'USSD return error',
+    0x38: 'Multiple Card command error',
+    0x39: 'Interaction with call/SM control by USIM, permanent problem',
+    0x3A: 'Bearer Independent Protocol error',
+    0x3B: 'Access Technology unable to process command',
+    0x3C: 'Frames error',
+    0x3D: 'MMS error',
+    # '3E'-'3F' reserved for 3GPP
 }
 
 
@@ -1515,18 +1540,18 @@ EVENT_TYPES = {
     0x03: 'Location status', 0x04: 'User activity', 0x05: 'Idle screen available',
     0x06: 'Card reader status', 0x07: 'Language selection',
     0x08: 'Browser termination', 0x09: 'Data available',
-    0x0A: 'Channel status', 0x0B: 'Access Technology Change',
+    0x0A: 'Channel status', 0x0B: 'Access Technology Change (single)',
     0x0C: 'Display parameters changed', 0x0D: 'Local connection',
     0x0E: 'Network Search Mode Change', 0x0F: 'Browsing status',
-    0x10: 'Frames Information Change', 0x11: 'I-WLAN Access Status',
-    0x12: 'Network Rejection', 0x13: 'HCI Connectivity',
-    0x14: 'Change of UICC Access', 0x15: 'CSG Cell Change',
-    0x16: 'Contactless state request', 0x17: 'Profile Container',
-    0x18: 'LTE D2D Discovery Monitoring', 0x19: 'LTE D2D Communication Monitoring',
-    0x1A: 'LTE D2D Announcement Response', 0x1B: 'LTE D2D Revocation',
-    0x1C: 'LTE D2D Application Port', 0x1D: 'LTE D2D Security Recovery',
-    0x1E: 'Off-net Emergency Call', 0x1F: 'ECall Over IMS',
-    0x20: 'EARFCN Update', 0x21: 'SCEF Channel Status',
+    0x10: 'Frames Information Change', 0x11: '(I-)WLAN Access Status',
+    0x12: 'Network Rejection', 0x13: 'HCI connectivity event',
+    0x14: 'Access Technology Change (multiple)', 0x15: 'CSG cell selection',
+    0x16: 'Contactless state request', 0x17: 'IMS Registration',
+    0x18: 'IMS Incoming data', 0x19: 'Profile Container',
+    0x1A: 'Void', 0x1B: 'Secured Profile Container',
+    0x1C: 'Poll Interval Negotiation', 0x1D: 'Data Connection Status Change',
+    0x1E: 'CAG cell selection', 0x1F: 'Slices Status Change',
+    # TS 102 223 §8.25: '20'-'22' reserved for 3GPP (future usage)
 }
 
 LOCATION_STATUS = {
@@ -1534,6 +1559,44 @@ LOCATION_STATUS = {
     0x01: 'Limited service',
     0x02: 'No service',
 }
+
+
+# TS 102 223 §8.7 device identity coding (summary per UICC_SPECS.md §6.2)
+_DEVICE_ID_RANGES = [
+    (0x10, 0x17, lambda v: f'Card reader {v - 0x10}'),
+    (0x21, 0x27, lambda v: f'Channel {v - 0x21}'),
+    (0x31, 0x3F, lambda v: f'eCAT client {v - 0x30}'),
+]
+_DEVICE_IDS = {
+    0x01: 'Keypad', 0x02: 'Display', 0x03: 'Earpiece',
+    0x81: 'UICC', 0x82: 'Terminal', 0x83: 'Network',
+}
+
+
+def _device_id_name(value):
+    """Decode one Device Identity byte (TS 102 223 §8.7)."""
+    if value in _DEVICE_IDS:
+        return _DEVICE_IDS[value]
+    for lo, hi, fmt in _DEVICE_ID_RANGES:
+        if lo <= value <= hi:
+            return fmt(value)
+    return f'0x{value:02X}'
+
+
+def _decode_device_ids(value):
+    """Decode a Device Identities TLV value into {src, dst} names."""
+    if len(value) < 2:
+        return None
+    return {'src': _device_id_name(value[0]), 'dst': _device_id_name(value[1])}
+
+
+def _decode_timer_value(b):
+    """Decode a 3-byte Timer Value (TS 102 223 §8.38): semi-octet h/m/s."""
+    if len(b) != 3:
+        return None
+    def so(x):
+        return '%d%d' % ((x >> 4) & 0x0F, x & 0x0F)
+    return f'{so(b[0])}:{so(b[1])}:{so(b[2])}'
 
 
 def _decode_bcd_address(data):
@@ -2184,57 +2247,109 @@ def _decode_envelope(body):
         return {}
     tag, _length, value = tlvs[0]
     result = {'type': ENVELOPE_TYPES.get(tag, f'0x{tag:02X}')}
-    inner = parse_tlv(value)
 
-    if tag == 0xD6:  # EVENT DOWNLOAD
-        for t, _l, v in inner:
-            if t == 0x19:  # Event list
+    if tag == 0xDE:  # ENVELOPE CONTAINER — wraps another complete envelope
+        for t, _l, v in parse_tlv(value):
+            if t in ENVELOPE_TYPES:
+                sub = _decode_envelope(bytes([t, len(v)]) + v)
+                sub['encapsulated'] = True
+                result['encapsulated'] = sub
+            elif (t & 0x7F) == _P_DEVICE_IDS:
+                d = _decode_device_ids(v)
+                if d:
+                    result['device_ids'] = d
+        return result
+
+    inner = parse_tlv(value)
+    raw_tlv = []
+    for t, _l, v in inner:
+        base = t & 0x7F
+        if base == _P_DEVICE_IDS:  # common to every envelope type
+            d = _decode_device_ids(v)
+            if d:
+                result['device_ids'] = d
+            continue
+        if tag == 0xD6:  # EVENT DOWNLOAD
+            if base == _P_EVENT_LIST and v:
                 result['events'] = [EVENT_TYPES.get(e, f'0x{e:02X}') for e in v]
-            elif t == 0x1B:  # Location status
+            elif base == _P_LOCATION_STATUS:
                 if v:
                     result['location_status'] = LOCATION_STATUS.get(v[0], f'0x{v[0]:02X}')
-            elif t == 0x13:  # Location information
+            elif base == _P_LOCAL_INFO:
                 li = _decode_local_info(PLI_LOCATION_INFO, v)
                 result['location_info'] = li['value'] if li else v.hex().upper()
-            elif t in (0x06, 0x86):  # Address (caller's number, MT call)
+            elif base == _P_ADDRESS and v:  # caller's number (MT call)
                 result['caller'] = _decode_bcd_address(v)
-            elif t == 0x1C:  # Transaction identifier (MT call)
+            elif base == _P_TRANSACTION_ID:
                 if v:
                     result['transaction_id'] = v[0]
-            elif t in (0x08, 0x88):  # Subaddress
+            elif base == _P_SUBADDRESS:
                 result['subaddress'] = v.hex().upper()
-            elif t == 0x02:  # Device identities
-                result['device_ids'] = v.hex().upper()
-    elif tag == 0xD5:  # MO SHORT MESSAGE CONTROL
-        for t, _l, v in inner:
-            if t == 0x06:  # Address objects
+            else:
+                raw_tlv.append({'tag': f'{base:02X}', 'value': v.hex().upper()})
+        elif tag == 0xD5:  # MO SHORT MESSAGE CONTROL
+            if base == _P_ADDRESS and v:
                 if 'smsc' not in result:
                     result['smsc'] = _decode_bcd_address(v)
                 else:
                     result['tp_da'] = _decode_bcd_address(v)
-            elif t == 0x13:
+            elif base == _P_LOCAL_INFO:
                 result['location_info'] = v.hex().upper()
-            elif t == 0x02:
-                result['device_ids'] = v.hex().upper()
-    elif tag == 0xD1:  # SMS-PP DOWNLOAD
-        for t, _l, v in inner:
-            if t == 0x06:
+            else:
+                raw_tlv.append({'tag': f'{base:02X}', 'value': v.hex().upper()})
+        elif tag == 0xD1:  # SMS-PP DOWNLOAD
+            if base == _P_ADDRESS and v:
                 result['smsc'] = _decode_bcd_address(v)
-            elif t in (0x0B, 0x8B):  # SMS TPDU (SMS-DELIVER)
+            elif base == _P_SMS_TPDU and v:
                 result['tpdu'] = _decode_sm_tpdu(v)
-            elif t == 0x02:
-                result['device_ids'] = v.hex().upper()
-    elif tag == 0xD2:  # CELL BROADCAST DOWNLOAD
-        for t, _l, v in inner:
-            if t == 0x02:
-                result['device_ids'] = v.hex().upper()
-            elif t in (0x0C, 0x8C):  # CB page
+            else:
+                raw_tlv.append({'tag': f'{base:02X}', 'value': v.hex().upper()})
+        elif tag == 0xD2:  # CELL BROADCAST DOWNLOAD
+            if base == _P_CB_PAGE and v:
                 result['cb_page'] = _decode_cb_page(v)
-    else:  # D3 / D4 / D7 — device identities only
-        for t, _l, v in inner:
-            if t == 0x02:
-                result['device_ids'] = v.hex().upper()
+            else:
+                raw_tlv.append({'tag': f'{base:02X}', 'value': v.hex().upper()})
+        elif tag == 0xD3:  # MENU SELECTION
+            if base == _P_ITEM_ID and v:
+                result['item_id'] = v[0]
+            elif base == _P_HELP_REQUEST:  # TS 101 220: '15'/'95', length 00
+                result['help'] = True
+            else:
+                raw_tlv.append({'tag': f'{base:02X}', 'value': v.hex().upper()})
+        elif tag == 0xD4:  # CALL CONTROL
+            if base == _P_ADDRESS and v:
+                result['address'] = _decode_bcd_address(v)
+            elif base == _P_CCP and v:
+                result['ccp'] = v.hex().upper()
+            elif base == _P_SUBADDRESS and v:
+                result['subaddress'] = v.hex().upper()
+            else:
+                raw_tlv.append({'tag': f'{base:02X}', 'value': v.hex().upper()})
+        elif tag == 0xD7:  # TIMER EXPIRATION
+            if base == _P_TIMER_ID and v:
+                result['timer_id'] = v[0] if len(v) == 1 else v.hex().upper()
+            elif base == _P_TIMER_VALUE:
+                tv = _decode_timer_value(v)
+                if tv:
+                    result['timer_value'] = tv
+            else:
+                raw_tlv.append({'tag': f'{base:02X}', 'value': v.hex().upper()})
+        elif tag == 0xD9:  # USSD DOWNLOAD
+            if base == _P_USSD_STRING and v:
+                result['ussd'] = _decode_dcs_text(v)
+            else:
+                raw_tlv.append({'tag': f'{base:02X}', 'value': v.hex().upper()})
+        elif tag == 0xDD:  # GEOGRAPHICAL LOCATION REPORTING
+            if base == _P_LOCAL_INFO and v:
+                li = _decode_local_info(PLI_LOCATION_INFO, v)
+                result['location_info'] = li['value'] if li else v.hex().upper()
+            else:
+                raw_tlv.append({'tag': f'{base:02X}', 'value': v.hex().upper()})
+        else:  # DA/DB/DC/DF/E0/… — keep objects visible as hex
+            raw_tlv.append({'tag': f'{base:02X}', 'value': v.hex().upper()})
 
+    if raw_tlv:
+        result['raw_tlv'] = raw_tlv
     return result
 
 
@@ -2254,6 +2369,24 @@ _P_RESPONSE_LEN = 0x11
 _P_EVENT_LIST = 0x19
 _P_ICON_ID = 0x1E
 _P_AID = 0x2F
+# TS 101 220 table (COMPREHENSION-TLV tags, base values; CR form = +0x80)
+_P_CCP = 0x07
+_P_SUBADDRESS = 0x08
+_P_USSD_STRING = 0x0A
+_P_CB_PAGE = 0x0C
+_P_LOCAL_INFO = 0x13
+_P_HELP_REQUEST = 0x15
+_P_ITEM_ID = 0x10
+_P_LOCATION_STATUS = 0x1B
+_P_TRANSACTION_ID = 0x1C
+_P_TIMER_ID = 0x24
+_P_TIMER_VALUE = 0x25
+
+# Commands whose payload is defined as a Text String (GSM 11.14 / TS 102 223):
+# DISPLAY TEXT, GET INKEY, GET INPUT, SET UP IDLE MODE TEXT.  Used for a
+# guarded fallback against non-compliant cards that send the Text String
+# with the next object's tag ('10', Item identifier).
+_TEXT_STRING_COMMANDS = {0x21, 0x22, 0x23, 0x28}
 
 
 def _decode_proactive(body):
@@ -2278,6 +2411,8 @@ def _decode_proactive(body):
     items = []
     file_list = []
     aid = None
+    raw_tlv = []
+    text_seen = False
     for tag, _length, value in inner:
         base = tag & 0x7F
         if base == _P_CMD_DETAILS and len(value) >= 2:
@@ -2288,6 +2423,7 @@ def _decode_proactive(body):
             result['title'] = _decode_annex_a(value)
         elif base == _P_TEXT_STRING:
             result['text'] = _decode_dcs_text(value)
+            text_seen = True
         elif base == _P_ITEM and len(value) >= 2:
             items.append({'id': value[0], 'text': _decode_annex_a(value[1:])})
         elif base == _P_SMS_TPDU and value:
@@ -2302,14 +2438,32 @@ def _decode_proactive(body):
             result['address'] = _decode_bcd_address(value)
         elif base == _P_ICON_ID and value:
             result['icon_id'] = value[0]
+        elif base == _P_ITEM_ID and len(value) == 1:
+            result['item_id'] = value[0]
+        elif base == _P_ITEM_ID and len(value) >= 2 and cmd_type in _TEXT_STRING_COMMANDS \
+                and not text_seen:
+            # Non-compliant card quirk (observed on a real SAT SIM): the
+            # Text String carries the Item identifier tag '10' instead of
+            # '8D'.  A genuine Item identifier is one byte, so length plus
+            # command context disambiguate the two.
+            result['text'] = _decode_dcs_text(value)
+            result['text_note'] = "text string with non-standard tag '10'"
+            text_seen = True
         elif base == _P_FILE_LIST and value:
             file_list = [value[i:i + 2].hex().upper() for i in range(0, len(value), 2)]
         elif base == _P_AID and value:
             aid = value.hex().upper()
+        elif base == _P_DEVICE_IDS and len(value) >= 2:
+            result['device_ids'] = _decode_device_ids(value)
+        else:
+            raw_tlv.append({'tag': f'{base:02X}', 'value': value.hex().upper()})
 
     if cmd_type is None:
         return None
-    result['type'] = CAT_COMMAND_TYPES.get(cmd_type, f'0x{cmd_type:02X}')
+    if 0xF0 <= cmd_type <= 0xFE:  # TS 102 223 §9.4 — reserved for proprietary use
+        result['type'] = f'Proprietary ({cmd_type:#04x})'
+    else:
+        result['type'] = CAT_COMMAND_TYPES.get(cmd_type, f'0x{cmd_type:02X}')
     qualifier_desc = _command_qualifier(cmd_type, qualifier)
     if qualifier_desc:
         result['qualifier'] = qualifier_desc
@@ -2319,6 +2473,8 @@ def _decode_proactive(body):
         result['aid'] = aid
     if items:
         result['items'] = items
+    if raw_tlv:
+        result['raw_tlv'] = raw_tlv
     return result
 
 

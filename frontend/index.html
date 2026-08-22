@@ -651,7 +651,11 @@ function cmdRows(cmd) {
     if (cmd.subaddress) rows.push(['Subaddress', cmd.subaddress]);
     if (cmd.smsc) rows.push(['SMSC', cmd.smsc]);
     if (cmd.tp_da) rows.push(['TP-DA', cmd.tp_da]);
-    if (cmd.device_ids) rows.push(['Device IDs', cmd.device_ids]);
+    if (cmd.device_ids) {
+        const di = cmd.device_ids;
+        rows.push(['Device IDs', typeof di === 'string' ? di
+            : (di.src + ' → ' + di.dst)]);
+    }
     if (cmd.cb_page) {
         const cb = cmd.cb_page;
         if (cb.serial) rows.push(['CB serial', cb.serial]);
@@ -676,6 +680,18 @@ function cmdRows(cmd) {
     if (cmd.duration) rows.push(['Duration', cmd.duration.value + ' ' + cmd.duration.unit]);
     if (cmd.address) rows.push(['Address', cmd.address]);
     if (cmd.response_length) rows.push(['Response length', cmd.response_length.min + '…' + cmd.response_length.max]);
+    if (cmd.item_id !== undefined) rows.push(['Item id', '0x' + hx(cmd.item_id, 2)]);
+    if (cmd.help) rows.push(['Help', 'requested']);
+    if (cmd.timer_id !== undefined) rows.push(['Timer id', '0x' + hx(cmd.timer_id, 2)]);
+    if (cmd.timer_value) rows.push(['Timer value', cmd.timer_value]);
+    if (cmd.ussd) rows.push(['USSD string', cmd.ussd]);
+    if (cmd.encapsulated && cmd.encapsulated.type) {
+        rows.push(['Encapsulated', cmd.encapsulated.type]);
+    }
+    if (cmd.text_note) rows.push(['Text note', cmd.text_note]);
+    if (cmd.raw_tlv) {
+        for (const t of cmd.raw_tlv) rows.push(['TLV 0x' + t.tag, t.value || '(empty)']);
+    }
 
     // SM TPDU (nested in SMS-PP download / SEND SHORT MESSAGE)
     const t = cmd.tpdu;
@@ -1852,7 +1868,7 @@ function onFilterChange() {
 }
 
 // ──────────────────── Versioning ────────────────────
-const PWA_VERSION = '1.11.0';
+const PWA_VERSION = '1.13.0';
 const MIN_SERVER_VERSION = '1.0.0';
 
 function parseVersion(v) {
