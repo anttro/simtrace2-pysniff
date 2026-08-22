@@ -1085,6 +1085,169 @@ def _idle_text_qualifier(qualifier):
 COMMAND_QUALIFIERS[0x28] = _idle_text_qualifier
 
 
+# ──────────────────── §8.6 bitmask qualifier decoders ────────────────────
+# Each decoder lists the *deviations from default*; an all-default (0x00)
+# qualifier stays hidden, a non-zero qualifier with only RFU bits set
+# falls back to raw hex.
+
+def _bitmask(fn):
+    def decoder(q):
+        val = fn(q)
+        parts = [val] if isinstance(val, str) else [p for p in val if p]
+        if parts:
+            return ', '.join(parts)
+        return None if q == 0 else f'0x{q:02X}'
+    return decoder
+
+
+def _alphabet_bit(q):
+    return 'UCS2 alphabet requested' if q & 0x02 else None
+
+
+def _help_bit(q):
+    return 'help information available' if q & 0x80 else None
+
+
+@_bitmask
+def _send_sm_qualifier(q):
+    return ['SMS packing by terminal required'] if q & 0x01 else []
+
+
+@_bitmask
+def _play_tone_qualifier(q):
+    return ['vibrate alert if available'] if q & 0x01 else []
+
+
+@_bitmask
+def _display_text_qualifier(q):
+    return [('high priority' if q & 0x01 else None),
+            ('wait for user to clear message' if q & 0x80 else None)]
+
+
+@_bitmask
+def _get_inkey_qualifier(q):
+    return [
+        'alphabet set requested' if q & 0x01 else None,
+        _alphabet_bit(q),
+        'Yes/No response requested' if q & 0x04 else None,
+        'immediate digit response requested' if q & 0x08 else None,
+        _help_bit(q),
+    ]
+
+
+@_bitmask
+def _get_input_qualifier(q):
+    return [
+        'alphabet set requested' if q & 0x01 else None,
+        _alphabet_bit(q),
+        'input shall not be revealed' if q & 0x04 else None,
+        'SMS packed format requested' if q & 0x08 else None,
+        _help_bit(q),
+    ]
+
+
+@_bitmask
+def _select_item_qualifier(q):
+    pres = []
+    if q & 0x01:
+        pres.append('navigation options presentation'
+                    if q & 0x02 else 'data values presentation')
+    return pres + ['selection using soft key preferred' if q & 0x04 else None,
+                   _help_bit(q)]
+
+
+@_bitmask
+def _set_up_menu_qualifier(q):
+    return ['selection using soft key preferred' if q & 0x01 else None,
+            _help_bit(q)]
+
+
+@_bitmask
+def _timer_mgmt_qualifier(q):
+    op = (q >> 1) & 0x03
+    return {1: 'deactivate timer', 2: 'get current timer value'}.get(op, [])
+
+
+@_bitmask
+def _language_notification_qualifier(q):
+    return ['specific language notification'] if q & 0x01 else []
+
+
+@_bitmask
+def _open_channel_qualifier(q):
+    # Coding depends on the bearer; bits decoded per the packet-data /
+    # local bearer definition (TS 102 223 §8.6).
+    parts = [p for p in [
+        'immediate link establishment' if q & 0x01 else None,
+        'automatic reconnection' if q & 0x02 else None,
+        'background mode link establishment' if q & 0x04 else None,
+        'DNS server address(es) requested' if q & 0x08 else None] if p]
+    return [p + ' (bearer-dependent)' for p in parts]
+
+
+@_bitmask
+def _close_channel_qualifier(q):
+    # Packet data service: b1 = reuse Network Access Name indication;
+    # other bearers code b1 differently — hence the note.
+    if q & 0x01:
+        return ['next OPEN CHANNEL reuses same NAA/bearer (bearer-dependent)']
+    return []
+
+
+@_bitmask
+def _send_data_qualifier(q):
+    return ['send data immediately'] if q & 0x01 else []
+
+
+@_bitmask
+def _declare_service_qualifier(q):
+    return ['delete service from terminal database'] if q & 0x01 else []
+
+
+@_bitmask
+def _display_mms_qualifier(q):
+    return [('high priority' if q & 0x01 else None),
+            ('wait for user to clear message' if q & 0x80 else None)]
+
+
+COMMAND_QUALIFIERS.update({
+    0x10: {0x00: 'set up call, but only if not currently busy',
+           0x01: 'set up call, not busy, with redial',
+           0x02: 'set up call, holding all other calls',
+           0x03: 'set up call, holding others, with redial',
+           0x04: 'set up call, disconnecting all other calls (if any)',
+           0x05: 'set up call, disconnecting others, with redial'},
+    0x13: _send_sm_qualifier,               # SEND SHORT MESSAGE
+    0x15: {0x00: 'launch browser if not already launched',
+           0x02: 'use existing browser (no secured session)',
+           0x03: 'close browser session and launch new'},   # LAUNCH BROWSER
+    0x20: _play_tone_qualifier,             # PLAY TONE
+    0x21: _display_text_qualifier,          # DISPLAY TEXT
+    0x22: _get_inkey_qualifier,             # GET INKEY
+    0x23: _get_input_qualifier,             # GET INPUT
+    0x24: _select_item_qualifier,           # SELECT ITEM
+    0x25: _set_up_menu_qualifier,           # SET UP MENU
+    0x27: _timer_mgmt_qualifier,            # TIMER MANAGEMENT
+    0x33: {0x00: 'Card reader status',
+           0x01: 'Card reader identifier'},  # GET READER STATUS
+    0x35: _language_notification_qualifier,  # LANGUAGE NOTIFICATION
+    0x40: _open_channel_qualifier,          # OPEN CHANNEL
+    0x41: _close_channel_qualifier,         # CLOSE CHANNEL
+    0x43: _send_data_qualifier,             # SEND DATA
+    0x47: _declare_service_qualifier,       # DECLARE SERVICE
+    0x50: {0x00: 'draw separator between adjoining frames',
+           0x01: 'no separator between frames'},            # SET FRAMES
+    0x62: _display_mms_qualifier,           # DISPLAY MULTIMEDIA MESSAGE
+    0x73: {0x00: 'end encapsulated command session',
+           0x01: 'request Master SA setup',
+           0x02: 'request Connection SA setup',
+           0x03: 'request Secure Channel Start',
+           0x04: 'close Master/Connection SA, keep session'},  # eCAT
+    0x79: {0x00: 'Proactive Session Request',
+           0x01: 'UICC Platform Reset'},     # LSI COMMAND
+})
+
+
 def _command_qualifier(cmd_type, qualifier):
     """Decode a Command Qualifier (Command Details byte 3) into a string.
 

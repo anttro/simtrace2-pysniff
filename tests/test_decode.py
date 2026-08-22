@@ -1779,6 +1779,67 @@ class TestEnvelopeDecoders(unittest.TestCase):
                          {'src': 'Network', 'dst': 'UICC'})
 
 
+class TestQualifiers(unittest.TestCase):
+    """Phase 3: §8.6 qualifier decoding for the remaining commands."""
+
+    def _fetch_qual(self, cmd_type, qual):
+        inner_hex = '810301%02x%02x820281828d00' % (cmd_type, qual)
+        inner = bytes.fromhex(inner_hex)
+        body = b'\xd0' + bytes([len(inner)]) + inner
+        r = decode_message(
+            bytes.fromhex('80120000%02x' % len(body)) + body + b'\x90\x00')
+        return r['cmd'].get('qualifier')
+
+    def test_set_up_call_value_table(self):
+        self.assertEqual(self._fetch_qual(0x10, 0x04),
+                         '0x04 set up call, disconnecting all other calls (if any)')
+
+    def test_display_text_bits(self):
+        self.assertEqual(self._fetch_qual(0x21, 0x81),
+                         'high priority, wait for user to clear message')
+        self.assertIsNone(self._fetch_qual(0x21, 0x00))
+
+    def test_get_inkey_bits(self):
+        self.assertEqual(self._fetch_qual(0x22, 0x0B),
+                         'alphabet set requested, UCS2 alphabet requested, '
+                         'immediate digit response requested')
+
+    def test_get_input_bits(self):
+        self.assertEqual(self._fetch_qual(0x23, 0x04),
+                         'input shall not be revealed')
+
+    def test_select_item_presentation_and_help(self):
+        self.assertEqual(self._fetch_qual(0x24, 0x05),
+                         'data values presentation, '
+                         'selection using soft key preferred')
+
+    def test_timer_management_ops(self):
+        self.assertEqual(self._fetch_qual(0x27, 0x02), 'deactivate timer')
+        self.assertEqual(self._fetch_qual(0x27, 0x04),
+                         'get current timer value')
+        self.assertIsNone(self._fetch_qual(0x27, 0x00))  # start = default
+
+    def test_send_sm_packing_bit(self):
+        self.assertEqual(self._fetch_qual(0x13, 0x01),
+                         'SMS packing by terminal required')
+
+    def test_open_channel_bearer_dependent(self):
+        self.assertIn('immediate link establishment',
+                      self._fetch_qual(0x40, 0x01))
+        self.assertIn('bearer-dependent', self._fetch_qual(0x40, 0x01))
+
+    def test_launch_browser_value_table(self):
+        self.assertEqual(self._fetch_qual(0x15, 0x03),
+                         "0x03 close browser session and launch new")
+
+    def test_lsi_command_values(self):
+        self.assertEqual(self._fetch_qual(0x79, 0x01), '0x01 UICC Platform Reset')
+
+    def test_rfu_byte_commands_stay_raw(self):
+        self.assertEqual(self._fetch_qual(0x02, 0xFF), '0xFF')  # MORE TIME
+        self.assertIsNone(self._fetch_qual(0x02, 0x00))
+
+
 class TestSwUiccSpecific(unittest.TestCase):
     """TS 102 221 UICC-specific SWs (tables 10.7-10.15)."""
 
