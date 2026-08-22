@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>SIMtrace Analyser</title>
 <link rel="manifest" href="manifest.json">
-<link rel="icon" type="image/svg+xml" href="sim-analyser.svg">
+<link rel="icon" type="image/svg+xml" href="sim-analyser.svg" id="favicon-svg">
 <link rel="icon" type="image/png" href="favicon.png">
 <meta name="theme-color" content="#0f172a">
 <style>
@@ -2009,6 +2009,9 @@ function applyTheme(theme) {
     document.getElementById('theme-btn').textContent = theme === 'dark' ? '☀️' : '🌙';
     document.querySelector('meta[name="theme-color"]').setAttribute(
         'content', theme === 'dark' ? '#0f172a' : '#fafafa');
+    const fav = document.getElementById('favicon-svg');
+    if (fav) fav.setAttribute('href',
+        theme === 'dark' ? 'sim-analyser.svg' : 'sim-analyser-light.svg');
 }
 
 function toggleTheme() {
