@@ -1047,11 +1047,26 @@ PLI_QUALIFIERS = {
 
 # TS 102 223 §8.6 — Command Qualifier tables per Type of Command.
 # Only commands with a known qualifier coding are listed; others fall back
-# to a raw '0xXX' in _command_qualifier.
+# to a raw '0xXX' in _command_qualifier.  An entry may also be a callable
+# for bitmask-style qualifiers (returns the decoded string or None).
 COMMAND_QUALIFIERS = {
     0x01: REFRESH_MODES,   # REFRESH
     0x26: PLI_QUALIFIERS,  # PROVIDE LOCAL INFORMATION
 }
+
+
+def _idle_text_qualifier(qualifier):
+    """SET UP IDLE MODE TEXT (TS 102 223 §6.6.13): bit 1 = icon
+    self-explanatory flag, all other bits RFU."""
+    if qualifier & ~0x01:
+        return f'0x{qualifier:02X}'
+    if qualifier & 0x01:
+        return 'icon self-explanatory'
+    return None
+
+
+# TS 102 223 §6.6.13 — SET UP IDLE MODE TEXT
+COMMAND_QUALIFIERS[0x28] = _idle_text_qualifier
 
 
 def _command_qualifier(cmd_type, qualifier):
@@ -1064,6 +1079,8 @@ def _command_qualifier(cmd_type, qualifier):
     if qualifier is None:
         return None
     table = COMMAND_QUALIFIERS.get(cmd_type)
+    if callable(table):
+        return table(qualifier)
     if table:
         name = table.get(qualifier)
         if name is None:
@@ -2235,6 +2252,7 @@ _P_ITEM = 0x0F
 _P_FILE_LIST = 0x12
 _P_RESPONSE_LEN = 0x11
 _P_EVENT_LIST = 0x19
+_P_ICON_ID = 0x1E
 _P_AID = 0x2F
 
 
@@ -2268,7 +2286,7 @@ def _decode_proactive(body):
                 qualifier = value[2]
         elif base == _P_ALPHA_ID and value:
             result['title'] = _decode_annex_a(value)
-        elif base == _P_TEXT_STRING and value:
+        elif base == _P_TEXT_STRING:
             result['text'] = _decode_dcs_text(value)
         elif base == _P_ITEM and len(value) >= 2:
             items.append({'id': value[0], 'text': _decode_annex_a(value[1:])})
@@ -2282,6 +2300,8 @@ def _decode_proactive(body):
             result['events'] = [EVENT_TYPES.get(e, f'0x{e:02X}') for e in value]
         elif base == _P_ADDRESS and value:
             result['address'] = _decode_bcd_address(value)
+        elif base == _P_ICON_ID and value:
+            result['icon_id'] = value[0]
         elif base == _P_FILE_LIST and value:
             file_list = [value[i:i + 2].hex().upper() for i in range(0, len(value), 2)]
         elif base == _P_AID and value:

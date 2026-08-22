@@ -667,6 +667,7 @@ function cmdRows(cmd) {
     if (cmd.aid) rows.push(['AID', cmd.aid]);
     if (cmd.title) rows.push(['Title', cmd.title]);
     if (cmd.text !== undefined) rows.push(['Text', cmd.text]);
+    if (cmd.icon_id !== undefined) rows.push(['Icon', cmd.icon_id ? 'record #' + cmd.icon_id : 'none']);
     if (cmd.items) {
         for (const it of cmd.items) {
             rows.push(['Item ' + (it.id !== undefined ? '0x' + hx(it.id, 2) : '?'), it.text]);
@@ -1851,7 +1852,7 @@ function onFilterChange() {
 }
 
 // ──────────────────── Versioning ────────────────────
-const PWA_VERSION = '1.10.0';
+const PWA_VERSION = '1.11.0';
 const MIN_SERVER_VERSION = '1.0.0';
 
 function parseVersion(v) {

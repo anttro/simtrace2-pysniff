@@ -1545,6 +1545,53 @@ class TestRefresh(unittest.TestCase):
         self.assertEqual(r['cmd']['file_list'], ['6F07', '6F20'])
 
 
+class TestIdleModeText(unittest.TestCase):
+    """SET UP IDLE MODE TEXT (TS 102 223 §6.6.13) proactive command."""
+
+    def _fetch(self, inner_hex):
+        # FETCH response body: D0 BER-TLV wrapping the proactive command
+        inner = bytes.fromhex(inner_hex)
+        body = b'\xd0' + bytes([len(inner)]) + inner
+        return decode_message(
+            bytes.fromhex('80120000%02x' % len(body)) + body + b'\x90\x00')
+
+    def test_8bit_text_icon_qualifier(self):
+        # "Hello" 8-bit + icon record 5 + qualifier bit 1 (self-explanatory)
+        r = self._fetch(
+            '810301280182028182'      # cmd details (qual 0x01) + device ids
+            '8d060448656c6c6f'        # Text String: DCS 0x04 (8-bit), "Hello"
+            '1e0105')                 # Icon Identifier: record 5
+        self.assertEqual(r['cat_command'], 'SET UP IDLE MODE TEXT')
+        self.assertEqual(r['cmd']['text'], 'Hello')
+        self.assertEqual(r['cmd']['qualifier'], 'icon self-explanatory')
+        self.assertEqual(r['cmd']['icon_id'], 5)
+
+    def test_ucs2_text(self):
+        # "Привет" UCS-2 (DCS 0x08)
+        r = self._fetch(
+            '810301280082028182'
+            '8d0d08041f04400438043204350442')
+        self.assertEqual(r['cat_command'], 'SET UP IDLE MODE TEXT')
+        self.assertEqual(r['cmd']['text'], 'Привет')
+
+    def test_qualifier_zero_hidden(self):
+        r = self._fetch('8103012800820281828d060448656c6c6f')
+        self.assertNotIn('qualifier', r['cmd'])
+
+    def test_qualifier_rfu_bits_raw(self):
+        r = self._fetch('8103012802820281828d060448656c6c6f')
+        self.assertEqual(r['cmd']['qualifier'], '0x02')
+
+    def test_empty_text_removes_idle_text(self):
+        # Zero-length Text String instructs the ME to remove the idle text
+        r = self._fetch('8103012800820281828d00')
+        self.assertEqual(r['cmd']['text'], '')
+
+    def test_no_icon_tlv(self):
+        r = self._fetch('8103012800820281828d060448656c6c6f')
+        self.assertNotIn('icon_id', r['cmd'])
+
+
 class TestSwUiccSpecific(unittest.TestCase):
     """TS 102 221 UICC-specific SWs (tables 10.7-10.15)."""
 
