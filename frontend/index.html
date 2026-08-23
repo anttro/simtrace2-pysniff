@@ -38,6 +38,7 @@
     --tr: #22d3ee;
     --envelope: #fbbf24;
     --auth: #f87171;
+    --pair-row: rgba(148, 163, 184, 0.12);
 }
 [data-theme="light"] {
     --bg: #fafafa;
@@ -68,6 +69,7 @@
     --tr: #0e7490;
     --envelope: #b45309;
     --auth: #dc2626;
+    --pair-row: rgba(100, 116, 139, 0.15);
 }
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -114,6 +116,7 @@ body { font: 14px/1.5 system-ui, sans-serif; background: var(--bg); color: var(-
 /* APDU list */
 .apdu-list { flex: 1; overflow-y: auto; padding: 8px; }
 .apdu-entry { display: flex; gap: 12px; padding: 3px 12px; border-bottom: 1px solid var(--bg-panel); cursor: pointer; align-items: baseline; }
+.apdu-entry.apdu-pair { background: var(--pair-row); }
 .apdu-entry:hover { background: var(--bg-panel); }
 .apdu-entry.selected { background: var(--bg-input); }
 [data-theme="light"] .apdu-entry.selected { background: #dbeafe; }
@@ -125,6 +128,7 @@ body { font: 14px/1.5 system-ui, sans-serif; background: var(--bg); color: var(-
 .apdu-type.cat-tr { font-weight: 700; color: var(--tr); }
 .apdu-type.cat-envelope { color: var(--envelope); }
 .apdu-type.cat-auth { color: var(--auth); }
+.apdu-type.cat-gr { color: var(--text-muted); font-weight: 600; }
 .apdu-data { font-family: monospace; color: var(--text-dim); word-break: break-all; flex: 1; }
 .apdu-sw { font-family: monospace; color: var(--text-muted); white-space: nowrap; min-width: 52px; }
 .apdu-sw.sw-ok { color: var(--green); }
@@ -1084,6 +1088,7 @@ function command_cat(ins) {
     if (ins === '14' || ins === '10' || ins === 'aa') return 'tr';  // TERMINAL RESPONSE / PROFILE / CAPABILITY
     if (ins === 'c2') return 'envelope';                     // ENVELOPE
     if (ins === '88' || ins === '89') return 'auth';         // AUTHENTICATE
+    if (ins === 'c0') return 'gr';                           // GET RESPONSE
     return null;
 }
 
@@ -1349,9 +1354,16 @@ function renderMessages(skipScroll) {
             (cat ? ' cat-' + cat : '');
         const errs = error_names(m);
         const errBadge = errs ? `<span class="apdu-err" title="${errs.join(', ')}">⚠</span>` : '';
-        return `<div class="apdu-entry" data-idx="${idx}">
+        // Command + GET RESPONSE pairs: subtle tint on both members,
+        // ↳ prefix marks the response as a continuation of the previous
+        // command (server sets response_for when prior SW1 was '61').
+        const isGR = m.type === 'tpdu' && m.decoded &&
+            m.decoded.ins_name === 'GET RESPONSE' && m.decoded.response_for;
+        const pairCls = (isGR || isOriginalCommand(idx)) ? ' apdu-pair' : '';
+        const grLabel = isGR ? '↳ ' + label : label;
+        return `<div class="apdu-entry${pairCls}" data-idx="${idx}">
             <span class="apdu-time">${fmt_elapsed(m.elapsed)}</span>
-            <span class="apdu-type ${typeCls}">${label}</span>
+            <span class="apdu-type ${typeCls}">${grLabel}</span>
             <span class="apdu-sw ${sw_class(m)}">${sw_text(m)}</span>
             <span class="apdu-data">${cmd_description(m)}</span>
             ${errBadge}
@@ -1869,7 +1881,7 @@ function onFilterChange() {
 }
 
 // ──────────────────── Versioning ────────────────────
-const PWA_VERSION = '1.14.0';
+const PWA_VERSION = '1.15.0';
 const MIN_SERVER_VERSION = '1.0.0';
 
 function parseVersion(v) {
