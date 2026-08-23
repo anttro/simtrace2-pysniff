@@ -682,7 +682,8 @@ function cmdRows(cmd) {
     if (cmd.response_length) rows.push(['Response length', cmd.response_length.min + '…' + cmd.response_length.max]);
     if (cmd.item_id !== undefined) rows.push(['Item id', '0x' + hx(cmd.item_id, 2)]);
     if (cmd.help) rows.push(['Help', 'requested']);
-    if (cmd.timer_id !== undefined) rows.push(['Timer id', '0x' + hx(cmd.timer_id, 2)]);
+    if (cmd.timer_id !== undefined) rows.push(['Timer id',
+        typeof cmd.timer_id === 'number' ? '0x' + hx(cmd.timer_id, 2) : cmd.timer_id]);
     if (cmd.timer_value) rows.push(['Timer value', cmd.timer_value]);
     if (cmd.ussd) rows.push(['USSD string', cmd.ussd]);
     if (cmd.encapsulated && cmd.encapsulated.type) {

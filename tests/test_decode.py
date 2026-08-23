@@ -1641,6 +1641,15 @@ class TestSatLegacyQuirks(unittest.TestCase):
         self.assertEqual(r['cmd']['text'], 'A')
         self.assertIn({'tag': '10', 'value': '010102'}, r['cmd']['raw_tlv'])
 
+    def test_compliant_text_clears_quirk_note(self):
+        # Quirk '10' text first, then a compliant 8D Text String:
+        # the compliant value wins and the stale note must disappear.
+        r = self._fetch('810301280082028182'
+                        '1003043337'          # non-standard '10': DCS+"37"
+                        '8d060448656c6c6f')   # compliant "Hello"
+        self.assertEqual(r['cmd']['text'], 'Hello')
+        self.assertNotIn('text_note', r['cmd'])
+
 
 class TestSpecRegistry(unittest.TestCase):
     """Registries verified against TS 102 223 V18.3.0 / TS 31.111 V18.12.0."""
@@ -1703,8 +1712,8 @@ class TestSpecRegistry(unittest.TestCase):
 
     def test_proprietary_type_fallback(self):
         r = self._fetch('810301f20082028182')
-        self.assertEqual(r['cat_command'], 'Proprietary (0xf2)')
-        self.assertEqual(r['cmd']['type'], 'Proprietary (0xf2)')
+        self.assertEqual(r['cat_command'], 'Proprietary (0xF2)')
+        self.assertEqual(r['cmd']['type'], 'Proprietary (0xF2)')
 
     def test_pli_qualifiers_esn_and_supported_rat(self):
         from simtrace2_pysniff.server.decode import PLI_QUALIFIERS
@@ -1731,7 +1740,7 @@ class TestEnvelopeDecoders(unittest.TestCase):
 
     def test_timer_expiration(self):
         # D7 | device ids | timer id 01 | timer value semi-octet h/m/s
-        r = self._envelope('D70C820282812401012503010203')
+        r = self._envelope('D70C820282812401012503102030')
         cmd = r['cmd']
         self.assertEqual(cmd['type'], 'TIMER EXPIRATION')
         self.assertEqual(cmd['timer_id'], 1)
@@ -1778,6 +1787,17 @@ class TestEnvelopeDecoders(unittest.TestCase):
         self.assertEqual(r['cmd']['device_ids'],
                          {'src': 'Network', 'dst': 'UICC'})
 
+    def test_timer_value_semi_octet_order(self):
+        # TS 23.040 semi-octets: first digit in the LOW nibble.
+        # 90 52 30 → "09:25:03" (pre-fix code read high-nibble first).
+        from simtrace2_pysniff.server.decode import _decode_timer_value
+        self.assertEqual(_decode_timer_value(bytes.fromhex('905230')),
+                         '09:25:03')
+        # 01 02 03 means "10:20:30", not "01:02:03".
+        self.assertEqual(_decode_timer_value(bytes.fromhex('010203')),
+                         '10:20:30')
+
+
 
 class TestQualifiers(unittest.TestCase):
     """Phase 3: §8.6 qualifier decoding for the remaining commands."""
@@ -1814,10 +1834,13 @@ class TestQualifiers(unittest.TestCase):
                          'selection using soft key preferred')
 
     def test_timer_management_ops(self):
-        self.assertEqual(self._fetch_qual(0x27, 0x02), 'deactivate timer')
-        self.assertEqual(self._fetch_qual(0x27, 0x04),
-                         'get current timer value')
+        # TS 102 223 §8.6: bits 1-2 — '00' start, '01' deactivate,
+        # '10' get current value, '11' RFU.
         self.assertIsNone(self._fetch_qual(0x27, 0x00))  # start = default
+        self.assertEqual(self._fetch_qual(0x27, 0x01), 'deactivate timer')
+        self.assertEqual(self._fetch_qual(0x27, 0x02),
+                         'get current timer value')
+        self.assertEqual(self._fetch_qual(0x27, 0x04), '0x04')  # b1-b2=00
 
     def test_send_sm_packing_bit(self):
         self.assertEqual(self._fetch_qual(0x13, 0x01),
@@ -1838,6 +1861,11 @@ class TestQualifiers(unittest.TestCase):
     def test_rfu_byte_commands_stay_raw(self):
         self.assertEqual(self._fetch_qual(0x02, 0xFF), '0xFF')  # MORE TIME
         self.assertIsNone(self._fetch_qual(0x02, 0x00))
+
+    def test_get_inkey_yes_no_suppresses_alphabet_bits(self):
+        # b3 (Yes/No) disables the b1/b2 character-set coding per §8.6
+        self.assertEqual(self._fetch_qual(0x22, 0x04),
+                         'Yes/No response requested')
 
 
 class TestSwUiccSpecific(unittest.TestCase):

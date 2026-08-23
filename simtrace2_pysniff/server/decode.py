@@ -1126,6 +1126,10 @@ def _display_text_qualifier(q):
 
 @_bitmask
 def _get_inkey_qualifier(q):
+    if q & 0x04:  # Yes/No mode disables the b1/b2 character-set coding
+        return ['Yes/No response requested',
+                'immediate digit response requested' if q & 0x08 else None,
+                _help_bit(q)]
     return [
         'alphabet set requested' if q & 0x01 else None,
         _alphabet_bit(q),
@@ -1164,7 +1168,9 @@ def _set_up_menu_qualifier(q):
 
 @_bitmask
 def _timer_mgmt_qualifier(q):
-    op = (q >> 1) & 0x03
+    # TS 102 223 §8.6: bits 1 to 2 — '00' start, '01' deactivate,
+    # '10' get current value, '11' RFU.
+    op = q & 0x03
     return {1: 'deactivate timer', 2: 'get current timer value'}.get(op, [])
 
 
@@ -1275,7 +1281,7 @@ def _command_details_name(value):
     if len(value) < 2:
         return None
     if 0xF0 <= value[1] <= 0xFE:  # TS 102 223 §9.4 — reserved for proprietary use
-        return f'Proprietary ({value[1]:#04x})'
+        return f'Proprietary (0x{value[1]:02X})'
     return CAT_COMMAND_TYPES.get(value[1])
 
 
@@ -1754,11 +1760,13 @@ def _decode_device_ids(value):
 
 
 def _decode_timer_value(b):
-    """Decode a 3-byte Timer Value (TS 102 223 §8.38): semi-octet h/m/s."""
+    """Decode a 3-byte Timer Value (TS 102 223 §8.38): TP-SCTS-style
+    semi-octets (first digit in the low nibble) for hour/minute/second."""
     if len(b) != 3:
         return None
     def so(x):
-        return '%d%d' % ((x >> 4) & 0x0F, x & 0x0F)
+        # TS 23.040 semi-octet representation: digit 1 in bits 1-4
+        return '%d%d' % (x & 0x0F, (x >> 4) & 0x0F)
     return f'{so(b[0])}:{so(b[1])}:{so(b[2])}'
 
 
@@ -2586,6 +2594,7 @@ def _decode_proactive(body):
             result['title'] = _decode_annex_a(value)
         elif base == _P_TEXT_STRING:
             result['text'] = _decode_dcs_text(value)
+            result.pop('text_note', None)  # compliant TLV wins over quirk note
             text_seen = True
         elif base == _P_ITEM and len(value) >= 2:
             items.append({'id': value[0], 'text': _decode_annex_a(value[1:])})
@@ -2624,7 +2633,7 @@ def _decode_proactive(body):
     if cmd_type is None:
         return None
     if 0xF0 <= cmd_type <= 0xFE:  # TS 102 223 §9.4 — reserved for proprietary use
-        result['type'] = f'Proprietary ({cmd_type:#04x})'
+        result['type'] = f'Proprietary (0x{cmd_type:02X})'
     else:
         result['type'] = CAT_COMMAND_TYPES.get(cmd_type, f'0x{cmd_type:02X}')
     qualifier_desc = _command_qualifier(cmd_type, qualifier)
