@@ -3858,13 +3858,22 @@ def decode_message(raw_data, prev=None):
                 result['file'] = {'sfi': rec_sfi, 'unknown': True, 'ef': f'SFI {rec_sfi}'}
         elif ins in (0xB0, 0xB2, 0xD6, 0xDC) and prev and prev.get('sel'):
             offset = p1p2.get('offset', 0)
-            if ins in (0xB2, 0xDC) or offset == 0:
-                if ins in (0xB2, 0xDC) and not _is_record_file(prev['sel']):
-                    result['file'] = _stale_file_note(prev['sel'])
-                else:
+            if ins in (0xB2, 0xDC) and not _is_record_file(prev['sel']):
+                result['file'] = _stale_file_note(prev['sel'])
+            else:
+                file_dec = None
+                if ins in (0xB2, 0xDC) or offset == 0:
                     file_dec = _decode_file_data(prev['sel']['fid'], body, p1=p1)
-                    if file_dec:
-                        result['file'] = file_dec
+                if file_dec:
+                    result['file'] = file_dec
+                else:
+                    # Known file, no content decoder (or non-zero offset) —
+                    # still attribute the operation to the selected file.
+                    result['file'] = {
+                        'fid': prev['sel']['fid'],
+                        'ef': KNOWN_FIDS.get(prev['sel']['fid'],
+                                             prev['sel']['fid'].upper()),
+                    }
 
     # SW
     if sw_bytes:
@@ -3884,6 +3893,13 @@ def decode_message(raw_data, prev=None):
                         file_dec = _decode_file_data(prev['sel']['fid'], remaining[:cmd_body_len])
                         if file_dec:
                             result['file'] = file_dec
+                        else:
+                            # Known file, no content decoder — attribute anyway.
+                            fid = prev['sel']['fid']
+                            result['file'] = {
+                                'fid': fid,
+                                'ef': KNOWN_FIDS.get(fid, fid.upper()),
+                            }
                 elif prev_ins == 0xA2 and prev.get('sel') and prev.get('file_ok'):
                     if not _is_record_file(prev['sel']):
                         result['file'] = _stale_file_note(prev['sel'])

@@ -1143,10 +1143,13 @@ class TestFileDecoders(unittest.TestCase):
         self.assertIn('IMSI 250011234567890', r['summary'])
 
     def test_read_binary_offset_skip(self):
+        # Non-zero offset: content decode is skipped (data starts mid-file)
+        # but the operation is still attributed to the selected file.
         r = decode_message(bytes.fromhex('00b00100') +
                            bytes.fromhex('082905102143658709') + bytes.fromhex('9000'),
                            prev={'sel': {'fid': '6f07'}})
-        self.assertNotIn('file', r)
+        self.assertEqual(r['file'], {'fid': '6f07', 'ef': 'EF_IMSI'})
+        self.assertNotIn('imsi', r['file'])
 
     def test_read_binary_offset_form(self):
         # b8 of P1 = 0 → offset = b7..b1 << 8 | P2.
@@ -2127,6 +2130,47 @@ class TestApduSpecCoverage(unittest.TestCase):
     def test_manage_lsi(self):
         r = self._ins('80', '7c', '0000', '0201')
         self.assertEqual(r, 'MANAGE LSI')
+
+
+class TestFileAttribution(unittest.TestCase):
+    """Non-SFI READ/UPDATE attribute to the last file selected in the
+    channel — even when the file has no content decoder (mobileid
+    session 63 regression: UPDATE BINARY after a proactive group)."""
+
+    SEL_SMSS = {'sel': {'fid': '6f43', 'name': 'EF_SMSS', 'structure': 'transparent'}}
+
+    def _upd(self, prev):
+        raw = bytes.fromhex('00d6000004aabbccdd' + '9000')
+        return decode_message(raw, prev=prev)
+
+    def test_update_atributed_without_content_decoder(self):
+        # EF_SMSS (6F43) has no FILE_DECODERS entry — attribution must
+        # still carry the file name.
+        r = self._upd(dict(self.SEL_SMSS, ins=0xB0, ins_name='SELECT', sw1='61'))
+        self.assertEqual(r['file'], {'fid': '6f43', 'ef': 'EF_SMSS'})
+
+    def test_update_with_content_decoder_wins(self):
+        prev = dict(self.SEL_SMSS, ins=0xB0, ins_name='SELECT', sw1='61')
+        prev['sel'] = {'fid': '6f7e', 'name': 'EF_LOCI', 'structure': 'transparent'}
+        raw = bytes.fromhex('00d600000b' + '00' * 11 + '9000')
+        r = decode_message(raw, prev=prev)
+        self.assertEqual(r['file']['ef'], 'EF_LOCI')
+        self.assertIn('mcc', r['file'])
+
+    def test_update_nonzero_offset_attributed(self):
+        # Content decode skipped for non-zero offset, attribution kept.
+        raw = bytes.fromhex('00d6001004aabbccdd' + '9000')
+        r = decode_message(raw, prev=dict(self.SEL_SMSS, ins=0xB0,
+                                          ins_name='SELECT', sw1='61'))
+        self.assertEqual(r['file']['ef'], 'EF_SMSS')
+
+    def test_get_response_attribution(self):
+        # READ BINARY (61 XX) → GET RESPONSE on a decoder-less file
+        prev = dict(self.SEL_SMSS, ins=0xB0, ins_name='READ BINARY', sw1='61',
+                    file_ok=True)
+        raw = bytes.fromhex('00c0000002' + 'cafe' + '9000')
+        r = decode_message(raw, prev=prev)
+        self.assertEqual(r['file'], {'fid': '6f43', 'ef': 'EF_SMSS'})
 
 
 class TestClaDecode(unittest.TestCase):
