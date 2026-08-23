@@ -1556,14 +1556,16 @@ class TestIdleModeText(unittest.TestCase):
             bytes.fromhex('80120000%02x' % len(body)) + body + b'\x90\x00')
 
     def test_8bit_text_icon_qualifier(self):
-        # "Hello" 8-bit + icon record 5 + qualifier bit 1 (self-explanatory)
+        # "Hello" 8-bit + icon record 5 + qualifier 0x01 (RFU byte — no
+        # icon bit exists per TS 102 223 V18.3.0 §8.6)
         r = self._fetch(
             '810301280182028182'      # cmd details (qual 0x01) + device ids
             '8d060448656c6c6f'        # Text String: DCS 0x04 (8-bit), "Hello"
             '1e0105')                 # Icon Identifier: record 5
         self.assertEqual(r['cat_command'], 'SET UP IDLE MODE TEXT')
         self.assertEqual(r['cmd']['text'], 'Hello')
-        self.assertEqual(r['cmd']['qualifier'], 'icon self-explanatory')
+        # Qualifier byte is RFU per V18.3.0 §8.6 — non-zero shows raw
+        self.assertEqual(r['cmd']['qualifier'], '0x01')
         self.assertEqual(r['cmd']['icon_id'], 5)
 
     def test_ucs2_text(self):

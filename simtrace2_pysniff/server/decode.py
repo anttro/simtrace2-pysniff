@@ -1069,20 +1069,9 @@ COMMAND_QUALIFIERS = {
     0x01: REFRESH_MODES,   # REFRESH
     0x26: PLI_QUALIFIERS,  # PROVIDE LOCAL INFORMATION
 }
-
-
-def _idle_text_qualifier(qualifier):
-    """SET UP IDLE MODE TEXT (TS 102 223 §6.6.13): bit 1 = icon
-    self-explanatory flag, all other bits RFU."""
-    if qualifier & ~0x01:
-        return f'0x{qualifier:02X}'
-    if qualifier & 0x01:
-        return 'icon self-explanatory'
-    return None
-
-
-# TS 102 223 §6.6.13 — SET UP IDLE MODE TEXT
-COMMAND_QUALIFIERS[0x28] = _idle_text_qualifier
+# NOTE: SET UP IDLE MODE TEXT ('28') has no entry — its Command Qualifier
+# is RFU per TS 102 223 V18.3.0 §8.6 ("this byte is RFU"); the generic
+# fallback (hidden at '00', raw hex otherwise) applies.
 
 
 # ──────────────────── §8.6 bitmask qualifier decoders ────────────────────
