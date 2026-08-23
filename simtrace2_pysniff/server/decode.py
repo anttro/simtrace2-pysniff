@@ -906,6 +906,65 @@ APDU_SPEC = {
         'p1p2': {'unused': True},
         'body': {'label': 'TLV data'},
     },
+    0xD0: {
+        'name': 'WRITE BINARY',
+        'p1p2': {'fmt': 'uint16be', 'label': 'Offset'},
+        'body': {'label': 'Data'},
+    },
+    0xD1: {
+        'name': 'WRITE BINARY (odd INS)',
+        'p1p2': {'fmt': 'uint16be', 'label': 'Offset'},
+        'body': {'label': 'BER-TLV data'},
+    },
+    0xA0: {
+        'name': 'SEARCH BINARY',
+        'p1p2': {'fmt': 'uint16be', 'label': 'Offset'},
+        'body': {'label': 'Search parameters'},
+    },
+    0xB3: {
+        'name': 'READ RECORD (odd INS)',
+        'le': True,
+        'p1': {'fmt': 'uint8', 'label': 'Record number'},
+        'p2': {
+            'label': 'Mode',
+            'bits': {
+                0x02: 'next record',
+                0x03: 'previous record',
+                0x04: 'absolute mode (record number in P1)',
+            },
+        },
+    },
+    0xC3: {
+        'name': 'ENVELOPE (odd INS)',
+        'body': {'label': 'BER-TLV data'},
+    },
+    0x7A: {
+        'name': 'EXCHANGE CAPABILITIES',
+        'p1p2': {'unused': True},
+        'body': {'label': 'Capability list'},
+    },
+    0xD4: {
+        'name': 'RESIZE FILE',
+        'p1p2': {'unused': True},
+        'body': {'label': 'BER-TLV data'},
+    },
+    0x0F: {
+        'name': 'ERASE BINARY (odd INS)',
+        'p1p2': {'fmt': 'uint16be', 'label': 'Offset'},
+        'body': {'label': 'BER-TLV data'},
+    },
+    0x2A: {
+        'name': 'PERFORM SECURITY OPERATION',
+        'p1': {'label': 'Operation'},
+        'p2': {'label': 'Operation'},
+        'body': {'label': 'Command data'},
+    },
+    0x46: {
+        'name': 'GENERATE ASYMMETRIC KEY PAIR',
+        'p1': {0x00: 'new key', 0x80: 'generate/derive', 0x81: 'read public key'},
+        'p2': {0x00: 'No indication'},
+        'body': {'label': 'BER-TLV data'},
+    },
 }
 
 
@@ -1530,10 +1589,13 @@ _FILE_TYPES = {
     0b111: 'DF or ADF',
 }
 _EF_STRUCTURES = {
+    # TS 102 221 Table 11.5 (overrides ISO 7816-4 Table 14, where 110 =
+    # cyclic and 100 = linear variable): 100 = cyclic, 110 = BER-TLV.
     0b000: 'no information',
     0b001: 'transparent',
     0b010: 'linear fixed',
-    0b110: 'cyclic',
+    0b100: 'cyclic',
+    0b110: 'BER-TLV',
 }
 _LIFE_CYCLE = {
     0x00: 'no information given',
@@ -1551,7 +1613,7 @@ def _decode_file_descriptor(value):
     if not value:
         return {}
     b = value[0]
-    ft = (b >> 3) & 0x07
+    ft = (b >> 3) & 0x07  # bits b6-b4 = file type (1-based; 0-based 5..3)
     result = {
         'shareable': 'shareable' if (b & 0x40) else 'not shareable',
         'file_type': _FILE_TYPES.get(ft, 'RFU'),
@@ -1603,8 +1665,16 @@ def _decode_fcp(data):
             result['sfi'] = value[0] >> 3 if value else None
         elif tag == 0x8A:
             result['life_cycle'] = _LIFE_CYCLE.get(value[0] if value else 0, f'0x{(value[0] if value else 0):02X}')
+        elif tag == 0x86:
+            result['security_attr_proprietary'] = value.hex().upper()
+        elif tag == 0x87:
+            result['extending_ef_id'] = value.hex().upper()
+        elif tag == 0x8B:
+            result['security_attr_expanded'] = value.hex().upper()
+        elif tag == 0x8C:
+            result['security_attr_compact'] = value.hex().upper()
         elif tag == 0xAB:
-            result['short_ef_id'] = value.hex().upper()
+            result['security_attr_template'] = value.hex().upper()
     if not sfi_seen and fid:
         sfi = int(fid, 16) & 0x1F
         result['sfi'] = sfi if 1 <= sfi <= 30 else None
@@ -3044,16 +3114,148 @@ def _decode_cbmi(raw, p1=None):
 
 
 def _decode_cbmir(raw, p1=None):
-    if len(raw) >= 4:
-        low = (raw[0] << 8) | raw[1]
-        high = (raw[2] << 8) | raw[3]
-        return {'range': [low, high]}
-    return {'raw': raw.hex().upper()}
+    """EF_CBMIR (§10.3.28): 4-byte ranges [msg-id low(2) + high(2)], 4n B."""
+    ranges = []
+    for i in range(0, len(raw) - 3, 4):
+        rec = raw[i:i + 4]
+        if all(b == 0xff for b in rec):
+            continue
+        low = (rec[0] << 8) | rec[1]
+        high = (rec[2] << 8) | rec[3]
+        ranges.append([low, high])
+    if not ranges:
+        return {'raw': raw.hex().upper()}
+    return {'ranges': ranges if len(ranges) > 1 else ranges[0]}
 
 
 def _decode_ecc(raw, p1=None):
-    txt = _decode_annex_a(raw.rstrip(b'\xff'))
-    return {'number': txt} if txt else {'raw': raw.hex().upper()}
+    """EF_ECC records (UICC_FILES §10.3.27): ECC digits BCD(2) + ESC(1)."""
+    if all(b == 0xff for b in raw):
+        return {'empty': True}
+    recs = []
+    for i in range(0, len(raw) - 2, 3):
+        rec = raw[i:i + 3]
+        if all(b == 0xff for b in rec):
+            continue
+        digits = _swap_nibbles(rec[:2].hex()).rstrip('fF')
+        recs.append({'number': digits or None, 'esc': f'0x{rec[2]:02X}'})
+    if not recs:
+        return {'raw': raw.hex().upper()}
+    return recs[0] if len(recs) == 1 else {'numbers': recs}
+
+
+def _decode_kc(raw, p1=None):
+    """EF_Kc / EF_KcGPRS (UICC_FILES §10.3.3): Kc(8) + Kc/KSI byte
+    (b8-b5 ciphering key sequence number, b4-b1 RFU)."""
+    if all(b == 0xff for b in raw):
+        return {'empty': True}
+    out = {'kc': raw[:8].hex().upper()} if len(raw) >= 8 else {}
+    if len(raw) >= 9:
+        out['ksi'] = (raw[8] >> 4) & 0x0F
+    return out or {'raw': raw.hex().upper()}
+
+
+def _decode_opl(raw, p1=None):
+    """EF_OPL (§10.3.42): PLMN(3, 'D' = wild) + LAC range(2+2) + PNN rec(1)."""
+    if all(b == 0xff for b in raw):
+        return {'empty': True}
+    recs = []
+    for i in range(0, len(raw) - 7, 8):
+        rec = raw[i:i + 8]
+        if all(b == 0xff for b in rec):
+            continue
+        plmn = _decode_plmn(rec[:3]) or {}
+        lac_lo = rec[3:5].hex().upper()
+        lac_hi = rec[5:7].hex().upper()
+        recs.append({
+            'mcc': plmn.get('mcc'), 'mnc': plmn.get('mnc'),
+            'lac_range': [lac_lo, lac_hi],
+            'pnn_record': rec[7],
+        })
+    if not recs:
+        return {'raw': raw.hex().upper()}
+    return recs[0] if len(recs) == 1 else {'records': recs}
+
+
+def _decode_ext1(raw, p1=None):
+    """EXT records (§10.5.10): len(1) + BCD(10) + CCP(1) + EXT(1)."""
+    if all(b == 0xff for b in raw):
+        return {'empty': True}
+    n = raw[0]
+    digits = _swap_nibbles(raw[1:11].hex())[:n * 2].rstrip('fF') if n else ''
+    return {
+        'number': digits or None,
+        'ccp': None if raw[11] == 0xff else raw[11],
+        'ext': None if raw[12] == 0xff else raw[12],
+    }
+
+
+def _decode_ad(raw, p1=None):
+    """EF_AD (§10.3.18): op mode + additional info + optional MNC length."""
+    if all(b == 0xff for b in raw):
+        return {'empty': True}
+    op = raw[0] & 0x03
+    out = {'op_mode': {0: 'normal operation', 1: 'specific features'}.get(op, f'0x{op:02X}'),
+           'test_mode': bool(raw[0] & 0x04)}
+    if len(raw) >= 3:
+        out['additional_info'] = raw[1:3].hex().upper()
+    if len(raw) >= 4 and raw[3] != 0xff:
+        out['mnc_length'] = raw[3]
+    return out
+
+
+def _decode_acl(raw, p1=None):
+    """EF_ACL (§4.2.48): APN count byte + 'DD'-tagged APN TLVs."""
+    if all(b == 0xff for b in raw):
+        return {'empty': True}
+    apns = []
+    for tag, _length, value in parse_tlv(raw[1:]):
+        if tag == 0xDD:
+            apns.append(value.decode('ascii', 'replace') if value else
+                        '(network provided)')
+    return {'apns': apns} if apns else {'raw': raw.hex().upper()}
+
+
+def _decode_smsp(raw, p1=None):
+    """EF_SMSP (§10.5.6): alpha(Y) + PI + TP-DA(12) + SCA(12) + PID/DCS/VP."""
+    if all(b == 0xff for b in raw):
+        return {'empty': True}
+    if len(raw) < 28:
+        return {'raw': raw.hex().upper()}
+    y = len(raw) - 28
+    out = {}
+    alpha = _decode_annex_a(raw[:y].rstrip(b'\xff'))
+    if alpha:
+        out['alpha'] = alpha
+    pi = raw[y]
+    out['param_indicators'] = f'0x{pi:02X}'
+    if not (pi & 0x01):
+        out['tp_da'] = _decode_bcd_address(raw[y + 1:y + 13][:12])
+    if not (pi & 0x10):
+        out['sca'] = _decode_bcd_address(raw[y + 13:y + 25][:12])
+    if not (pi & 0x02):
+        out['tp_pid'] = f'0x{raw[y + 25]:02X}'
+    if not (pi & 0x04):
+        out['tp_dcs'] = f'0x{raw[y + 26]:02X}'
+    if not (pi & 0x08):
+        out['tp_vp'] = f'0x{raw[y + 27]:02X}'
+    return out
+
+
+def _decode_spdi(raw, p1=None):
+    """EF_SPDI (§4.2.66): 'A3' container with PLMN records (§0.3)."""
+    if all(b == 0xff for b in raw):
+        return {'empty': True}
+    for tag, _length, value in parse_tlv(raw):
+        if tag == 0xA3:
+            plmns = []
+            for i in range(0, len(value) - 2, 3):
+                plmn = _decode_plmn(value[i:i + 3])
+                if plmn:
+                    plmns.append(f"{plmn['mcc']}-{plmn['mnc']}")
+            if plmns:
+                return {'plmns': plmns if len(plmns) > 1 else plmns[0]}
+    return {'raw': raw.hex().upper()}
 
 
 def _decode_spn(raw, p1=None):
@@ -3229,6 +3431,18 @@ FILE_DECODERS = {
     '6fc4': _decode_hex,
     '6fca': _decode_hex,
     '6fc9': _decode_hex,
+    '6f20': _decode_kc,
+    '6f52': _decode_kc,
+    '6fc6': _decode_opl,
+    '6f4a': _decode_ext1,
+    '6f4b': _decode_ext1,
+    '6f4c': _decode_ext1,
+    '6f4e': _decode_ext1,
+    '6f55': _decode_ext1,
+    '6fad': _decode_ad,
+    '6f57': _decode_acl,
+    '6f42': _decode_smsp,
+    '6fcd': _decode_spdi,
 }
 
 

@@ -1870,6 +1870,136 @@ class TestQualifiers(unittest.TestCase):
                          'Yes/No response requested')
 
 
+class TestFileDescriptor(unittest.TestCase):
+    """Audit: TS 102 221 Table 11.5 file descriptor byte coding."""
+
+    def _fdb(self, hexstr):
+        from simtrace2_pysniff.server.decode import _decode_file_descriptor
+        return _decode_file_descriptor(bytes.fromhex(hexstr))
+
+    def test_df_shareable(self):
+        r = self._fdb('78')
+        self.assertEqual(r['file_type'], 'DF or ADF')
+        self.assertEqual(r['shareable'], 'shareable')
+
+    def test_transparent_working_ef(self):
+        r = self._fdb('01')
+        self.assertEqual(r['file_type'], 'Working EF')
+        self.assertEqual(r['structure'], 'transparent')
+
+    def test_cyclic_is_100_not_110(self):
+        # TS 221 T11.5 overrides ISO: 100 = cyclic, 110 = BER-TLV
+        self.assertEqual(self._fdb('04')['structure'], 'cyclic')
+        self.assertEqual(self._fdb('06')['structure'], 'BER-TLV')
+
+    def test_type_bits_b6_b4(self):
+        # 0x09 = 0b00001001: type bits b6b5b4=001 (Internal), structure 001
+        r = self._fdb('09')
+        self.assertEqual(r['file_type'], 'Internal EF')
+        self.assertEqual(r['structure'], 'transparent')
+
+    def test_record_params(self):
+        r = self._fdb('42020030')  # shareable linear, data coding 0x02, rec len 48
+        self.assertEqual(r['file_type'], 'Working EF')
+        self.assertEqual(r['structure'], 'linear fixed')
+        self.assertEqual(r['data_coding'], '0x02')
+        self.assertEqual(r['record_length'], 48)
+
+
+class TestFcpTags(unittest.TestCase):
+    """Audit: FCP tag registry per ISO T12 / TS 221 §11.1.1.4."""
+
+    def test_ab_is_security_attributes(self):
+        from simtrace2_pysniff.server.decode import _decode_fcp
+        r = _decode_fcp(bytes.fromhex('6204ab02aabb'))
+        # outer 6F wrapper → recurse; AB = security attributes template
+        self.assertIn('security_attr_template', r)
+        self.assertNotIn('short_ef_id', r)
+
+    def test_sfi_tag_88_high_bits(self):
+        from simtrace2_pysniff.server.decode import _decode_fcp
+        # SFI 7 in bits b8-b4 → value byte 0x38
+        r = _decode_fcp(bytes.fromhex('880138'))
+        self.assertEqual(r['sfi'], 7)
+
+    def test_sfi_fallback_fid_low_bits(self):
+        from simtrace2_pysniff.server.decode import _decode_fcp
+        r = _decode_fcp(bytes.fromhex('83026f7e'))
+        self.assertEqual(r['sfi'], 0x1e)  # 6F7E & 0x1F = 30
+
+
+class TestNewFileDecoders(unittest.TestCase):
+    """Audit: file decoders added per UICC_FILES.md."""
+
+    def test_ecc_bcd_and_esc(self):
+        from simtrace2_pysniff.server.decode import _decode_ecc
+        r = _decode_ecc(bytes.fromhex('11f200'), p1=None)
+        self.assertEqual(r['number'], '112')
+        self.assertEqual(r['esc'], '0x00')
+
+    def test_kc_ksi(self):
+        from simtrace2_pysniff.server.decode import _decode_kc
+        r = _decode_kc(bytes.fromhex('0011223344556677' + '07'), p1=None)
+        self.assertEqual(r['kc'], '0011223344556677')
+        self.assertEqual(r['ksi'], 0)
+
+    def test_opl_record(self):
+        from simtrace2_pysniff.server.decode import _decode_opl
+        # PLMN 250-01 (52 f0 f1), LAC 0000..FFFE, PNN rec 1
+        r = _decode_opl(bytes.fromhex('52f0100000fffe01'), p1=None)
+        self.assertEqual(r['mcc'], '250')
+        self.assertEqual(r['mnc'], '01')
+        self.assertEqual(r['lac_range'], ['0000', 'FFFE'])
+        self.assertEqual(r['pnn_record'], 1)
+
+    def test_ext1(self):
+        from simtrace2_pysniff.server.decode import _decode_ext1
+        raw = bytes.fromhex('03' + '21f39210000000000000' + 'ff' + 'ff')
+        r = _decode_ext1(raw, p1=None)
+        self.assertTrue(r['number'].startswith('123'))
+        self.assertIsNone(r['ccp'])
+        self.assertIsNone(r['ext'])
+
+    def test_ad(self):
+        from simtrace2_pysniff.server.decode import _decode_ad
+        r = _decode_ad(bytes.fromhex('00000003'), p1=None)
+        self.assertEqual(r['op_mode'], 'normal operation')
+        self.assertEqual(r['mnc_length'], 3)
+
+    def test_acl(self):
+        from simtrace2_pysniff.server.decode import _decode_acl
+        r = _decode_acl(bytes.fromhex('01dd08696e7465726e6574'), p1=None)
+        self.assertEqual(r['apns'], ['internet'])
+
+    def test_spdi(self):
+        from simtrace2_pysniff.server.decode import _decode_spdi
+        r = _decode_spdi(bytes.fromhex('a30652f01000f110'), p1=None)
+        self.assertEqual(r['plmns'], ['250-01', '001-01'])
+
+    def test_smsp(self):
+        from simtrace2_pysniff.server.decode import _decode_smsp
+        raw = bytes.fromhex('00' + '00' + 'ff' * 24 + '000000')
+        r = _decode_smsp(raw, p1=None)
+        self.assertEqual(r['param_indicators'], '0x00')
+
+    def test_cbmir_multiple_ranges(self):
+        from simtrace2_pysniff.server.decode import _decode_cbmir
+        r = _decode_cbmir(bytes.fromhex('00 01 00 02' .replace(' ', '') + 'fffe0000'), p1=None)
+        self.assertEqual(r['ranges'], [[1, 2], [65534, 0]])
+
+    def test_missing_apdu_spec_names(self):
+        from simtrace2_pysniff.server.decode import decode_message
+        for ins, name in [('d0', 'WRITE BINARY'), ('a0', 'SEARCH BINARY'),
+                          ('b3', 'READ RECORD (odd INS)'),
+                          ('c3', 'ENVELOPE (odd INS)'),
+                          ('7a', 'EXCHANGE CAPABILITIES'),
+                          ('d4', 'RESIZE FILE'),
+                          ('2a', 'PERFORM SECURITY OPERATION'),
+                          ('46', 'GENERATE ASYMMETRIC KEY PAIR')]:
+            r = decode_message(bytes.fromhex('00' + ins + '000000' + '9000'))
+            self.assertEqual(r['ins_name'], name, ins)
+
+
 class TestSwUiccSpecific(unittest.TestCase):
     """TS 102 221 UICC-specific SWs (tables 10.7-10.15)."""
 
