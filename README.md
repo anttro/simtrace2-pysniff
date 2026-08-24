@@ -28,7 +28,10 @@ that both captures APDU traffic and serves that PWA.
   decryption** of ciphered packets — paste the card's 3DES/AES key in the
   detail view to reveal the real CNTR and secured application data (the
   key stays in the browser, in-memory only; ciphered on-wire CNTR/PCNTR/RC
-  are ciphertext and labeled as such)
+  are ciphertext and labeled as such); the secured application message is
+  decoded as a stream of **C-APDUs** (SELECT, UPDATE BINARY, …) with
+  full CLA/INS/P1/P2/Lc/Le breakdown — plaintext immediately, or after
+  decryption for ciphered packets
 - ATR parse (clock-rate conversion, Fi/Di, T-bitmask) and FCP/FCI TLV
 
 **simtrace-analyser PWA** ([`frontend/`](frontend/)):
