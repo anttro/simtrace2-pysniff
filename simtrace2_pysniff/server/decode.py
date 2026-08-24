@@ -2335,6 +2335,12 @@ def _decode_secured_packet(body):
         'cntr': cntr.hex().upper(),
         'pcntr': pcntr,
         'data': data.hex().upper(),
+        # Contiguous ciphered on-wire octets (CNTR ‖ PCNTR ‖ RC/CC/DS ‖
+        # secured data + padding) — the block a client-side decryptor
+        # feeds to 3DES/AES-CBC with a zero IV (TS 102 225 Table 2 n.1).
+        'cipher_block': body[10:].hex().upper(),
+        'kic_raw': kic,
+        'kid_raw': kid,
     }
     kic_algo = _KIC_ALGO.get(kic & 0x0F, 'reserved')
     if not (spi1 & 0x04):  # SPI says no ciphering → KIc unused

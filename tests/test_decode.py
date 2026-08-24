@@ -2127,6 +2127,28 @@ class TestSecuredCiphering(unittest.TestCase):
         r = decode_message(raw, prev=prev)
         self.assertTrue(r['response']['ciphered'])
 
+    def test_cipher_block_contiguous(self):
+        # cipher_block = the on-wire ciphered octets (CNTR..end) and equals
+        # the reassembled cntr+pcntr+rc+data — what a client-side decryptor
+        # feeds to 3DES/AES-CBC.
+        from simtrace2_pysniff.server.decode import _decode_secured_packet
+        sec = bytes.fromhex('00381516011515b000011830a44e4191ad45d0ec'
+                            '2a291315986468a539d248fcdce7952c31cd635baec'
+                            '7e93a5d567b59f6283316c0dad8603bf3'.replace(' ', ''))
+        r = _decode_secured_packet(sec)
+        self.assertEqual(len(r['cipher_block']) // 2, 48)
+        self.assertEqual(r['cipher_block'],
+                         (r['cntr'] + f'{r["pcntr"]:02X}' + r['rc_cc_ds'] + r['data']))
+        self.assertEqual(r['kic_raw'], 0x15)
+        self.assertEqual(r['kid_raw'], 0x15)
+
+    def test_aes_algorithm_recognized(self):
+        # AES must stay recognized for ciphering (KIc nibble 2) and for the
+        # CC (KID nibble 2 = AES-CMAC) — the client-side decryptor relies on it.
+        from simtrace2_pysniff.server.decode import _KIC_ALGO, _KID_CC_ALGO
+        self.assertEqual(_KIC_ALGO[0x02], 'AES-CBC')
+        self.assertEqual(_KID_CC_ALGO[0x02], 'AES-CMAC')
+
 
 class TestSpiBits(unittest.TestCase):
     """TS 102 225 §5.1.1: SPI1 b3 = ciphering, SPI2 b5 = PoR ciphering."""

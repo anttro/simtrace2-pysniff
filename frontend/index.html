@@ -147,6 +147,9 @@ body { font: 14px/1.5 system-ui, sans-serif; background: var(--bg); color: var(-
 .detail-header { display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; background: var(--bg-input); border-bottom: 1px solid var(--border); }
 [data-theme="light"] .detail-header { background: #dbeafe; }
 .detail-header strong { font-size: 13px; }
+.decrypt-strip { padding: 6px 12px; border-top: 1px solid var(--border); background: var(--bg-panel); font-size: 12px; display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.decrypt-strip input { background: var(--bg-input); color: var(--text); border: 1px solid var(--border); border-radius: 4px; padding: 3px 8px; font-family: monospace; width: 260px; }
+.decrypt-strip button { background: var(--accent); color: #fff; border: none; border-radius: 4px; padding: 4px 10px; cursor: pointer; font-weight: 600; }
 .detail-body { padding: 8px 12px; font-family: monospace; font-size: 12px; line-height: 1.6; }
 .detail-body table { width: 100%; border-collapse: collapse; }
 .detail-body td { padding: 1px 8px; vertical-align: top; }
@@ -485,6 +488,171 @@ function detail_time_html(msg) {
     return abs ? `${fmt_elapsed(msg.elapsed)} · ${abs}` : fmt_elapsed(msg.elapsed);
 }
 
+// ──────────────────── SCP80 decryption (client-side only) ────────────────────
+// Keys are entered per packet, memoized by key-set for the session, held
+// in-memory only and never sent to the server.
+const OTA_KEYS = {};      // key-set number -> key hex
+const DECRYPT_CACHE = {}; // cipher_block hex -> {cntr,pcntr,rc,data,pad} | {error}
+
+function hexToBytes(h) {
+    const o = [];
+    for (let i = 0; i + 1 < h.length; i += 2) o.push(parseInt(h.substr(i, 2), 16));
+    return o;
+}
+function bytesToHex(b) {
+    return (b || []).map(x => x.toString(16).padStart(2, '0')).join('').toUpperCase();
+}
+
+// ── DES / 3DES core (FIPS 46-3 tables, bit-array implementation) ──
+const _PC1 = [57,49,41,33,25,17,9,1,58,50,42,34,26,18,10,2,59,51,43,35,27,19,11,3,60,52,44,36,63,55,47,39,31,23,15,7,62,54,46,38,30,22,14,6,61,53,45,37,29,21,13,5,28,20,12,4];
+const _PC2 = [14,17,11,24,1,5,3,28,15,6,21,10,23,19,12,4,26,8,16,7,27,20,13,2,41,52,31,37,47,55,30,40,51,45,33,48,44,49,39,56,34,53,46,42,50,36,29,32];
+const _SHIFTS = [1,1,2,2,2,2,2,2,1,2,2,2,2,2,2,1];
+const _IP = [58,50,42,34,26,18,10,2,60,52,44,36,28,20,12,4,62,54,46,38,30,22,14,6,64,56,48,40,32,24,16,8,57,49,41,33,25,17,9,1,59,51,43,35,27,19,11,3,61,53,45,37,29,21,13,5,63,55,47,39,31,23,15,7];
+const _FP = [40,8,48,16,56,24,64,32,39,7,47,15,55,23,63,31,38,6,46,14,54,22,62,30,37,5,45,13,53,21,61,29,36,4,44,12,52,20,60,28,35,3,43,11,51,19,59,27,34,2,42,10,50,18,58,26,33,1,41,9,49,17,57,25];
+const _EXP = [32,1,2,3,4,5,4,5,6,7,8,9,8,9,10,11,12,13,12,13,14,15,16,17,16,17,18,19,20,21,20,21,22,23,24,25,24,25,26,27,28,29,28,29,30,31,32,1];
+const _PP = [16,7,20,21,29,12,28,17,1,15,23,26,5,18,31,10,2,8,24,14,32,27,3,9,19,13,30,6,22,11,4,25];
+const _SB = [
+  [14,4,13,1,2,15,11,8,3,10,6,12,5,9,0,7,0,15,7,4,14,2,13,1,10,6,12,11,9,5,3,8,4,1,14,8,13,6,2,11,15,12,9,7,3,10,5,0,15,12,8,2,4,9,1,7,5,11,3,14,10,0,6,13],
+  [15,1,8,14,6,11,3,4,9,7,2,13,12,0,5,10,3,13,4,7,15,2,8,14,12,0,1,10,6,9,11,5,0,14,7,11,10,4,13,1,5,8,12,6,9,3,2,15,13,8,10,1,3,15,4,2,11,6,7,12,0,5,14,9],
+  [10,0,9,14,6,3,15,5,1,13,12,7,11,4,2,8,13,7,0,9,3,4,6,10,2,8,5,14,12,11,15,1,13,6,4,9,8,15,3,0,11,1,2,12,5,10,14,7,1,10,13,0,6,9,8,7,4,15,14,3,11,5,2,12],
+  [7,13,14,3,0,6,9,10,1,2,8,5,11,12,4,15,13,8,11,5,6,15,0,3,4,7,2,12,1,10,14,9,10,6,9,0,12,11,7,13,15,1,3,14,5,2,8,4,3,15,0,6,10,1,13,8,9,4,5,11,12,7,2,14],
+  [2,12,4,1,7,10,11,6,8,5,3,15,13,0,14,9,14,11,2,12,4,7,13,1,5,0,15,10,3,9,8,6,4,2,1,11,10,13,7,8,15,9,12,5,6,3,0,14,11,8,12,7,1,14,2,13,6,15,0,9,10,4,5,3],
+  [12,1,10,15,9,2,6,8,0,13,3,4,14,7,5,11,10,15,4,2,7,12,9,5,6,1,13,14,0,11,3,8,9,14,15,5,2,8,12,3,7,0,4,10,1,13,11,6,4,3,2,12,9,5,15,10,11,14,1,7,6,0,8,13],
+  [4,11,2,14,15,0,8,13,3,12,9,7,5,10,6,1,13,0,11,7,4,9,1,10,14,3,5,12,2,15,8,6,1,4,11,13,12,3,7,14,10,15,6,8,0,5,9,2,6,11,13,8,1,4,10,7,9,5,0,15,14,2,3,12],
+  [13,2,8,4,6,15,11,1,10,9,3,14,5,0,12,7,1,15,13,8,10,3,7,4,12,5,6,11,0,14,9,2,7,11,4,1,9,12,14,2,0,6,10,13,15,3,5,8,2,1,14,7,4,10,8,13,15,12,9,0,3,5,6,11],
+];
+
+function _permute(tab, bits) {
+    const out = new Array(tab.length);
+    for (let i = 0; i < tab.length; i++) out[i] = bits[tab[i] - 1];
+    return out;
+}
+function _xorArr(a, b) {
+    const o = new Array(a.length);
+    for (let i = 0; i < a.length; i++) o[i] = a[i] ^ b[i];
+    return o;
+}
+function _rol28(bits, n) {
+    const o = new Array(28);
+    for (let i = 0; i < 28; i++) o[i] = bits[(i + n) % 28];
+    return o;
+}
+function _bytesToBits(bytes) {
+    const bits = [];
+    for (const b of bytes) for (let j = 7; j >= 0; j--) bits.push((b >> j) & 1);
+    return bits;
+}
+function _bitsToBytes(bits) {
+    const out = [];
+    for (let i = 0; i + 8 <= bits.length; i += 8) {
+        let b = 0;
+        for (let j = 0; j < 8; j++) b = (b << 1) | bits[i + j];
+        out.push(b);
+    }
+    return out;
+}
+function _desKeySchedule(keyBytes) {
+    const k = _permute(_PC1, _bytesToBits(keyBytes));
+    let c = k.slice(0, 28), d = k.slice(28);
+    const subkeys = [];
+    for (let r = 0; r < 16; r++) {
+        c = _rol28(c, _SHIFTS[r]);
+        d = _rol28(d, _SHIFTS[r]);
+        subkeys.push(_permute(_PC2, c.concat(d)));
+    }
+    return subkeys;
+}
+function _desF(R, sk) {
+    const x = _xorArr(_permute(_EXP, R), sk);
+    const sOut = [];
+    for (let i = 0; i < 8; i++) {
+        const b = x.slice(i * 6, i * 6 + 6);
+        const row = (b[0] << 1) | b[5];
+        const col = (b[1] << 3) | (b[2] << 2) | (b[3] << 1) | b[4];
+        const v = _SB[i][row * 16 + col];
+        sOut.push((v >> 3) & 1, (v >> 2) & 1, (v >> 1) & 1, v & 1);
+    }
+    return _permute(_PP, sOut);
+}
+function _desBlock(bits, subkeys, decrypt) {
+    const b = _permute(_IP, bits);
+    let L = b.slice(0, 32), R = b.slice(32);
+    for (let r = 0; r < 16; r++) {
+        const sk = decrypt ? subkeys[15 - r] : subkeys[r];
+        const newR = _xorArr(L, _desF(R, sk));
+        L = R;
+        R = newR;
+    }
+    return _permute(_FP, R.concat(L));
+}
+// 3DES-CBC decrypt — keyBytes: 16 (K3=K1) or 24 octets; ivBytes: 8 zero octets.
+function des3CbcDecrypt(keyBytes, ivBytes, ctBytes) {
+    const s1 = _desKeySchedule(keyBytes.slice(0, 8));
+    const s2 = _desKeySchedule(keyBytes.slice(8, 16));
+    const s3 = _desKeySchedule(keyBytes.length >= 24 ? keyBytes.slice(16, 24) : keyBytes.slice(0, 8));
+    let prev = ivBytes.slice();
+    const out = [];
+    for (let i = 0; i + 8 <= ctBytes.length; i += 8) {
+        const block = _bytesToBits(ctBytes.slice(i, i + 8));
+        let b = _desBlock(block, s3, true);   // D_K3
+        b = _desBlock(b, s2, false);          // E_K2
+        b = _desBlock(b, s1, true);           // D_K1
+        out.push(..._bitsToBytes(_xorArr(b, _bytesToBits(prev))));
+        prev = ctBytes.slice(i, i + 8);
+    }
+    return out;
+}
+// Single DES-CBC decrypt (deprecated KIc coding '01').
+function desCbcDecrypt(keyBytes, ivBytes, ctBytes) {
+    const s = _desKeySchedule(keyBytes.slice(0, 8));
+    let prev = ivBytes.slice();
+    const out = [];
+    for (let i = 0; i + 8 <= ctBytes.length; i += 8) {
+        const b = _desBlock(_bytesToBits(ctBytes.slice(i, i + 8)), s, true);
+        out.push(..._bitsToBytes(_xorArr(b, _bytesToBits(prev))));
+        prev = ctBytes.slice(i, i + 8);
+    }
+    return out;
+}
+
+// Decrypt a ciphered secured packet block with the user-supplied key hex.
+// Returns {cntr, pcntr, rc, data, pad} byte arrays; throws on bad key/size.
+async function decryptSecured(sec, keyHex) {
+    const nibble = (sec.kic_raw !== undefined ? sec.kic_raw : 0) & 0x0F;
+    const ct = hexToBytes(sec.cipher_block);
+    const iv = new Array(8).fill(0);  // TS 102 225: CBC initial chaining value = zero
+    let pt;
+    if (nibble === 0x02) {  // AES-CBC
+        const key = hexToBytes(keyHex);
+        if (![16, 24, 32].includes(key.length)) throw new Error('AES key must be 16/24/32 bytes');
+        const k = await crypto.subtle.importKey('raw', new Uint8Array(key), 'AES-CBC', false, ['decrypt']);
+        const buf = await crypto.subtle.decrypt({name: 'AES-CBC', iv: new Uint8Array(16)}, k, new Uint8Array(ct));
+        pt = Array.from(new Uint8Array(buf));
+    } else if (nibble === 0x05 || nibble === 0x09) {  // 3DES-CBC 2/3 keys
+        const key = hexToBytes(keyHex);
+        if (nibble === 0x05 && key.length !== 16 && key.length !== 24)
+            throw new Error('3DES (2 keys) key must be 16 bytes (or 24 with K3=K1)');
+        if (nibble === 0x09 && key.length !== 24)
+            throw new Error('3DES (3 keys) key must be 24 bytes');
+        pt = des3CbcDecrypt(key, iv, ct);
+    } else if (nibble === 0x01) {  // single DES (deprecated)
+        const key = hexToBytes(keyHex);
+        if (key.length !== 8) throw new Error('DES key must be 8 bytes');
+        pt = desCbcDecrypt(key, iv, ct);
+    } else {
+        throw new Error('cipher algorithm not supported for decryption');
+    }
+    const rcLen = sec.rc_cc_ds ? sec.rc_cc_ds.length / 2 : 0;
+    if (pt.length < 6 + rcLen) throw new Error('decrypted block too short');
+    const cntr = pt.slice(0, 5);
+    const pcntr = pt[5];
+    const rc = pt.slice(6, 6 + rcLen);
+    const dataAll = pt.slice(6 + rcLen);
+    if (pcntr > dataAll.length) throw new Error('invalid padding count — wrong key?');
+    const data = dataAll.slice(0, dataAll.length - pcntr);
+    return {cntr, pcntr, rc, data, pad: pcntr};
+}
+
 function fmt_data(hex, limit) {
     limit = limit || 32;
     const pairs = (hex || '').match(/.{1,2}/g) || [];
@@ -771,6 +939,20 @@ function cmdRows(cmd) {
             rows.push(['PCNTR' + enc, sec.pcntr]);
             if (sec.rc_cc_ds) rows.push(['RC/CC/DS' + enc, sec.rc_cc_ds]);
             rows.push(['Secured data', sec.data]);
+            // Decrypted values (client-side, key supplied by the user).
+            const dec = sec.cipher_block ? DECRYPT_CACHE[sec.cipher_block] : null;
+            if (dec) {
+                if (dec.error) {
+                    rows.push(['Decrypt error', dec.error]);
+                } else {
+                    const cntrHex = bytesToHex(dec.cntr);
+                    const cntrDec = BigInt('0x' + cntrHex).toString();
+                    rows.push(['CNTR (decrypted)', '0x' + cntrHex + ' (' + cntrDec + ')']);
+                    rows.push(['PCNTR (decrypted)', dec.pcntr]);
+                    if (dec.rc.length) rows.push(['RC/CC/DS (decrypted)', bytesToHex(dec.rc)]);
+                    rows.push(['Secured data (decrypted)', bytesToHex(dec.data)]);
+                }
+            }
         }
 
         const rp = t.response_packet;
@@ -1065,6 +1247,44 @@ function showDetail(msg, entry) {
             ${decoded.errors ? `<tr><td class="label">Errors</td><td class="value" style="color:var(--error)">${decoded.errors.join(', ')}</td></tr>` : ''}
         </table>
     </div>`;
+
+    // Ciphered SCP80 command packet → client-side decrypt strip (the key
+    // never leaves the browser; memoized per key-set for the session).
+    const secured = ((decoded.cmd || {}).tpdu || {}).secured;
+    if (secured && secured.ciphered && secured.cipher_block) {
+        const strip = document.createElement('div');
+        strip.className = 'decrypt-strip';
+        const keySet = secured.kic ? secured.kic.key : 0;
+        strip.innerHTML = `<span style="color:var(--text-muted)">Ciphered packet — 3DES/AES key (hex) for key set ${keySet}:</span> ` +
+            `<input type="text" class="decrypt-key" placeholder="key hex" spellcheck="false"> ` +
+            `<button class="decrypt-btn">Decrypt</button> ` +
+            `<span class="decrypt-status" style="color:var(--text-muted)"></span>`;
+        d.appendChild(strip);
+        const input = strip.querySelector('.decrypt-key');
+        const status = strip.querySelector('.decrypt-status');
+        const btn = strip.querySelector('.decrypt-btn');
+        const run = async () => {
+            const keyHex = input.value.trim().toLowerCase();
+            if (!keyHex) return;
+            try {
+                const parsed = await decryptSecured(secured, keyHex);
+                OTA_KEYS[keySet] = keyHex;
+                DECRYPT_CACHE[secured.cipher_block] = parsed;
+                status.textContent = '✓ decrypted';
+                status.style.color = 'var(--green)';
+                showDetail(msg, entry);  // re-render with decrypted rows
+            } catch (e) {
+                status.textContent = '✗ ' + e.message;
+                status.style.color = 'var(--error)';
+            }
+        };
+        btn.addEventListener('click', run);
+        input.addEventListener('keydown', ev => { if (ev.key === 'Enter') run(); });
+        if (OTA_KEYS[keySet] && !DECRYPT_CACHE[secured.cipher_block]) {
+            input.value = OTA_KEYS[keySet];
+            run();
+        }
+    }
 }
 function buildTypeCounts() {
     const counts = {};
@@ -1906,7 +2126,7 @@ function onFilterChange() {
 }
 
 // ──────────────────── Versioning ────────────────────
-const PWA_VERSION = '1.18.0';
+const PWA_VERSION = '1.19.0';
 const MIN_SERVER_VERSION = '1.0.0';
 
 function parseVersion(v) {
