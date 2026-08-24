@@ -372,6 +372,7 @@ const STATE = {
     currentSessionId: null,
     currentSessionName: null,
     sessionViewId: null,
+    sessionStarted: null,
     livePoller: null,
     messages: [],
     typeCounts: [],
@@ -465,6 +466,23 @@ function fmt_elapsed(e) {
     const s = Math.floor(e);
     const ms = Math.round((e - s) * 1000);
     return `${String(s).padStart(4, '0')}.${String(ms).padStart(3, '0')}`;
+}
+
+function fmt_absolute(e) {
+    // Absolute wall-clock time of a message: session/capture start
+    // (sessions.started, local time) + message elapsed offset.
+    if (!STATE.sessionStarted) return null;
+    const t = new Date(STATE.sessionStarted);
+    if (isNaN(t)) return null;
+    t.setMilliseconds(t.getMilliseconds() + Math.round(e * 1000));
+    const p = (n, w) => String(n).padStart(w || 2, '0');
+    return `${t.getFullYear()}-${p(t.getMonth() + 1)}-${p(t.getDate())} ` +
+        `${p(t.getHours())}:${p(t.getMinutes())}:${p(t.getSeconds())}.${p(t.getMilliseconds(), 3)}`;
+}
+
+function detail_time_html(msg) {
+    const abs = fmt_absolute(msg.elapsed);
+    return abs ? `${fmt_elapsed(msg.elapsed)} · ${abs}` : fmt_elapsed(msg.elapsed);
 }
 
 function fmt_data(hex, limit) {
@@ -920,19 +938,19 @@ function showDetail(msg, entry) {
     const decoded = msg.decoded;
 
     if (msg.type === 'gap') {
-        d.innerHTML = `<div class="detail-header"><strong>Capture Gap</strong><span style="color:var(--text-muted)">${fmt_elapsed(msg.elapsed)}</span></div>
+        d.innerHTML = `<div class="detail-header"><strong>Capture Gap</strong><span style="color:var(--text-muted)">${detail_time_html(msg)}</span></div>
             <div class="detail-body" style="color:var(--warn);">⚠ ${t('The device disconnected and reconnected — some APDUs may be missing from this trace.')}</div>`;
         return;
     }
 
     if (!decoded) {
-        d.innerHTML = `<div class="detail-header"><strong>${ins_label(msg)}</strong><span style="color:var(--text-muted)">${fmt_elapsed(msg.elapsed)}</span></div>
+        d.innerHTML = `<div class="detail-header"><strong>${ins_label(msg)}</strong><span style="color:var(--text-muted)">${detail_time_html(msg)}</span></div>
             <div class="detail-body" style="color:var(--text-muted);">No decoded data available for this message type.</div>`;
         return;
     }
 
     if (decoded.type === 'change') {
-        d.innerHTML = `<div class="detail-header"><strong>State Change</strong><span style="color:var(--text-muted)">${fmt_elapsed(msg.elapsed)}</span></div>
+        d.innerHTML = `<div class="detail-header"><strong>State Change</strong><span style="color:var(--text-muted)">${detail_time_html(msg)}</span></div>
             <div class="detail-body">
                 <table>
                     <tr><td class="label">Flags</td><td class="value">${decoded.flags.join(', ') || 'no changes'}</td></tr>
@@ -942,7 +960,7 @@ function showDetail(msg, entry) {
     }
 
     if (decoded.type === 'fidi') {
-        d.innerHTML = `<div class="detail-header"><strong>Fi/Di Change</strong><span style="color:var(--text-muted)">${fmt_elapsed(msg.elapsed)}</span></div>
+        d.innerHTML = `<div class="detail-header"><strong>Fi/Di Change</strong><span style="color:var(--text-muted)">${detail_time_html(msg)}</span></div>
             <div class="detail-body">
                 <table>
                     <tr><td class="label">Fi</td><td class="value">${decoded.fi_val} (index ${decoded.fi})</td></tr>
@@ -955,7 +973,7 @@ function showDetail(msg, entry) {
 
     if (decoded.type === 'atr' || decoded.type === 'pps') {
         const rows = atrPpsRows(decoded);
-        d.innerHTML = `<div class="detail-header"><strong>${decoded.type.toUpperCase()}</strong><span style="color:var(--text-muted)">${fmt_elapsed(msg.elapsed)}</span></div>
+        d.innerHTML = `<div class="detail-header"><strong>${decoded.type.toUpperCase()}</strong><span style="color:var(--text-muted)">${detail_time_html(msg)}</span></div>
             <div class="detail-body">
                 <table>
                     ${rows.map(([l, v]) => `<tr><td class="label">${l}</td><td class="hex">${v}</td></tr>`).join('')}
@@ -1024,7 +1042,7 @@ function showDetail(msg, entry) {
 
     d.innerHTML = `<div class="detail-header">
         <strong>${decoded.cat_command || decoded.ins_name}</strong>
-        <span style="color:var(--text-muted)">${fmt_elapsed(msg.elapsed)}</span>
+        <span style="color:var(--text-muted)">${detail_time_html(msg)}</span>
     </div>
     <div class="detail-body">
         <table>
@@ -1466,6 +1484,7 @@ async function startCapture() {
         const data = await API.startCapture();
         STATE.captureActive = true;
         STATE.currentSessionId = data.session_id;
+        STATE.sessionStarted = data.started;
         STATE.messages = [];
         _lastAfter = 0;
         STATE.mapExpanded.clear();
@@ -1623,6 +1642,7 @@ async function loadSession(id) {
 
         const data = await API.getSession(id, 0);
         STATE.sessionViewId = id;
+        STATE.sessionStarted = data.session.started;
         STATE.captureActive = false;
         STATE.currentSessionName = data.session.name || t('Session #') + id;
         STATE.messages = data.messages;
@@ -1881,7 +1901,7 @@ function onFilterChange() {
 }
 
 // ──────────────────── Versioning ────────────────────
-const PWA_VERSION = '1.16.1';
+const PWA_VERSION = '1.17.0';
 const MIN_SERVER_VERSION = '1.0.0';
 
 function parseVersion(v) {
