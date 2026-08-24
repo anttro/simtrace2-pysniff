@@ -1,0 +1,8 @@
+{
+  "name": "simtrace-analyser-frontend",
+  "private": true,
+  "description": "Frontend tests for the vendored C-APDU parser and SCP80 decryption (node --test extracts the code from index.html)",
+  "scripts": {
+    "test": "node --test"
+  }
+}

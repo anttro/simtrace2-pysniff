@@ -913,9 +913,23 @@ async function decryptSecured(sec, keyHex) {
     if (nibble === 0x02) {  // AES-CBC
         const key = hexToBytes(keyHex);
         if (![16, 24, 32].includes(key.length)) throw new Error('AES key must be 16/24/32 bytes');
-        const k = await crypto.subtle.importKey('raw', new Uint8Array(key), 'AES-CBC', false, ['decrypt']);
-        const buf = await crypto.subtle.decrypt({name: 'AES-CBC', iv: new Uint8Array(16)}, k, new Uint8Array(ct));
-        pt = Array.from(new Uint8Array(buf));
+        if (ct.length % 16) throw new Error('cipher block not AES-aligned');
+        // WebCrypto CBC decrypt always validates PKCS#7, which SCP80
+        // padding (PCNTR) violates. Trick: append a synthetic block
+        // C* = E(C_last XOR padBlock) — decrypting it yields a valid
+        // full-block PKCS padding (16 × 0x10), so validation passes and
+        // the real plaintext is recovered; the synthetic block is discarded.
+        const k = await crypto.subtle.importKey('raw', new Uint8Array(key), 'AES-CBC', false, ['encrypt', 'decrypt']);
+        const padBlock = new Array(16).fill(0x10);
+        const last = ct.slice(ct.length - 16);
+        const target = _xorArr(last, padBlock);
+        const eRaw = await crypto.subtle.encrypt(
+            {name: 'AES-CBC', iv: new Uint8Array(16)}, k, new Uint8Array(target));
+        const cStar = Array.from(new Uint8Array(eRaw)).slice(0, 16);
+        const buf = await crypto.subtle.decrypt(
+            {name: 'AES-CBC', iv: new Uint8Array(16)}, k,
+            new Uint8Array(ct.concat(cStar)));
+        pt = Array.from(new Uint8Array(buf)).slice(0, ct.length);
     } else if (nibble === 0x05 || nibble === 0x09) {  // 3DES-CBC 2/3 keys
         const key = hexToBytes(keyHex);
         if (nibble === 0x05 && key.length !== 16 && key.length !== 24)
@@ -2451,7 +2465,7 @@ function onFilterChange() {
 }
 
 // ──────────────────── Versioning ────────────────────
-const PWA_VERSION = '1.20.0';
+const PWA_VERSION = '1.20.1';
 const MIN_SERVER_VERSION = '1.0.0';
 
 function parseVersion(v) {
