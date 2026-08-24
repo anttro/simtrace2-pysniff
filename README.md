@@ -24,7 +24,11 @@ that both captures APDU traffic and serves that PWA.
 - SMS TPDU — SMS-DELIVER/SUBMIT, SCTS timestamps, UDH information elements
 - SCP80 OTA secured packets — SPI bits (ciphering, PoR requirement/mode,
   RC/CC/DS, counter), KIc/KID algorithm + key set, TAR, CNTR/PCNTR;
-  Response Packet (PoR) decode on GET RESPONSE
+  Response Packet (PoR) decode on GET RESPONSE; **optional client-side
+  decryption** of ciphered packets — paste the card's 3DES/AES key in the
+  detail view to reveal the real CNTR and secured application data (the
+  key stays in the browser, in-memory only; ciphered on-wire CNTR/PCNTR/RC
+  are ciphertext and labeled as such)
 - ATR parse (clock-rate conversion, Fi/Di, T-bitmask) and FCP/FCI TLV
 
 **simtrace-analyser PWA** ([`frontend/`](frontend/)):
