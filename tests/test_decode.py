@@ -1976,8 +1976,29 @@ class TestNewFileDecoders(unittest.TestCase):
 
     def test_spdi(self):
         from simtrace2_pysniff.server.decode import _decode_spdi
-        r = _decode_spdi(bytes.fromhex('a30652f01000f110'), p1=None)
-        self.assertEqual(r['plmns'], ['250-01', '001-01'])
+        # Standard form: A3 wrapping inner '80' TLVs, one PLMN each
+        r = _decode_spdi(bytes.fromhex('a30a8003' '52f010' '8003' '72f010'), p1=None)
+        self.assertEqual(r['plmns'], [{'mcc': '250', 'mnc': '01'},
+                                      {'mcc': '270', 'mnc': '01'}])
+
+    def test_spdi_bare_records_fallback(self):
+        from simtrace2_pysniff.server.decode import _decode_spdi
+        r = _decode_spdi(bytes.fromhex('a306' '52f010' '00f110'), p1=None)
+        self.assertEqual(r['plmns'], [{'mcc': '250', 'mnc': '01'},
+                                      {'mcc': '001', 'mnc': '01'}])
+
+    def test_spdi_read_binary_regression(self):
+        # stk_test1 session msg 14036: READ BINARY of EF_SPDI crashed
+        # _build_summary (plmns were strings, not dicts) → whole message
+        # decoded as None ("No decoded data available").
+        prev = {'sel': {'fid': '6fcd', 'name': 'EF_SPDI',
+                        'structure': 'transparent'},
+                'ins': 0xA4, 'ins_name': 'SELECT', 'sw1': '61'}
+        r = decode_message(bytes.fromhex(
+            '00b000000da305800352f020ffffffffffff9000'), prev=prev)
+        self.assertEqual(r['file']['plmns'],
+                         [{'mcc': '250', 'mnc': '02'}])
+        self.assertIn('250/02', r['summary'])
 
     def test_smsp(self):
         from simtrace2_pysniff.server.decode import _decode_smsp

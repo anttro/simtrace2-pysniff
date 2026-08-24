@@ -3243,19 +3243,32 @@ def _decode_smsp(raw, p1=None):
 
 
 def _decode_spdi(raw, p1=None):
-    """EF_SPDI (§4.2.66): 'A3' container with PLMN records (§0.3)."""
+    """EF_SPDI (§4.2.66): 'A3' container (or bare '80' value tags) with
+    3-byte PLMN records — same shape as EF_PLMNwAcT for _file_summary."""
     if all(b == 0xff for b in raw):
         return {'empty': True}
+    plmns = []
+
+    def collect(value):
+        for i in range(0, len(value) - 2, 3):
+            plmn = _decode_plmn(value[i:i + 3])
+            if plmn and plmn not in plmns:
+                plmns.append(plmn)
+
     for tag, _length, value in parse_tlv(raw):
         if tag == 0xA3:
-            plmns = []
-            for i in range(0, len(value) - 2, 3):
-                plmn = _decode_plmn(value[i:i + 3])
-                if plmn:
-                    plmns.append(f"{plmn['mcc']}-{plmn['mnc']}")
-            if plmns:
-                return {'plmns': plmns if len(plmns) > 1 else plmns[0]}
-    return {'raw': raw.hex().upper()}
+            got = False
+            for t2, _l2, v2 in parse_tlv(value):
+                if t2 == 0x80:
+                    collect(v2)
+                    got = True
+            if not got:
+                collect(value)  # bare records inside A3
+        elif tag == 0x80:
+            collect(value)
+    if not plmns:
+        return {'raw': raw.hex().upper()}
+    return {'plmns': plmns}
 
 
 def _decode_spn(raw, p1=None):
