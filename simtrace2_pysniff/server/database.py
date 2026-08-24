@@ -310,11 +310,13 @@ class Database:
             file_ok = True
         elif ins in (0xB0, 0xD6):
             file_ok = (d.get('p1p2') or {}).get('value', 0) == 0
+        sec = ((d.get('cmd') or {}).get('tpdu') or {}).get('secured') or {}
         return {
             'ins': ins,
             'ins_name': d.get('ins_name'),
             'sw1': (d.get('sw') or {}).get('sw1'),
             'file_ok': file_ok,
+            'por_ciphered': bool((sec.get('spi') or {}).get('por_ciphered')),
         }
 
     def _selection_after(self, d, sel):

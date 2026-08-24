@@ -2293,6 +2293,11 @@ def _decode_secured_packet(body):
 
     *body* is the TP-UD remainder after the UDH (CPI IEI 0x70).  Returns a
     dict of the decoded header fields; ``{'raw': hex}`` when unparseable.
+
+    When SPI indicates ciphering, the on-wire CNTR, PCNTR and RC/CC/DS are
+    CIPHERTEXT (TS 102 225 Table 2, note 1 — the whole block from CNTR
+    through the secured data is encrypted); ``'ciphered'`` is set so
+    callers do not present those bytes as the real values.
     """
     if not body or len(body) < 16:
         return {'raw': body.hex().upper()} if body else {}
@@ -2305,6 +2310,7 @@ def _decode_secured_packet(body):
     cntr = body[10:15]
     pcntr = body[15]
     spi1, spi2 = spi[0], spi[1]
+    ciphered = bool(spi1 & 0x04)
     rc_cc_ds_kind = spi1 & 0x03
     rc_cc_ds_len = max(0, chl - 13)  # 13 = SPI+KIc+KID+TAR+CNTR+PCNTR
     rc_cc_ds = body[16:16 + rc_cc_ds_len]
@@ -2313,6 +2319,7 @@ def _decode_secured_packet(body):
     result = {
         'cpl': cpl,
         'chl': chl,
+        'ciphered': ciphered,
         'spi': {
             'hex': spi.hex().upper(),
             'counter': _OTA_COUNTER.get((spi1 >> 4) & 0x03, 'reserved'),
@@ -2349,11 +2356,17 @@ def _decode_secured_packet(body):
     return result
 
 
-def _decode_response_packet(body):
+def _decode_response_packet(body, ciphered=False):
     """Decode a Response Packet (TS 102 225 §5.2 / TS 31.115 §4.4).
 
     *body* is the TP-UD remainder after the UDH (RPI IEI 0x71).  Returns a
     dict of the decoded header fields; ``{'raw': hex}`` when unparseable.
+
+    *ciphered* reflects the command's SPI2.b5 (PoR ciphering): when set,
+    the on-wire CNTR, PCNTR and RC/CC/DS are ciphertext (Table 4, note 1)
+    and ``'ciphered'`` is set in the result.  A standalone Response Packet
+    (e.g. inside an SMS-SUBMIT) carries no SPI, so the state is unknowable
+    there and defaults to False.
     """
     if not body or len(body) < 13:
         return {'raw': body.hex().upper()} if body else {}
@@ -2370,6 +2383,7 @@ def _decode_response_packet(body):
     result = {
         'rpl': rpl,
         'rhl': rhl,
+        'ciphered': bool(ciphered),
         'tar': tar.hex().upper(),
         'cntr': cntr.hex().upper(),
         'pcntr': pcntr,
@@ -3929,7 +3943,8 @@ def decode_message(raw_data, prev=None):
                     # RPI mapping precedes the packet: UDHL='02', IEIa='71',
                     # IEIDLa='00' (TS 31.115 §4.4).
                     if data[:3] == b'\x02\x71\x00':
-                        result['response'] = _decode_response_packet(data[3:])
+                        result['response'] = _decode_response_packet(
+                            data[3:], ciphered=bool(prev.get('por_ciphered')))
                 else:
                     response = _decode_response_for(prev_ins, remaining[:cmd_body_len])
                     if response:

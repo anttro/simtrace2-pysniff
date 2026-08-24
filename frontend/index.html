@@ -633,13 +633,14 @@ function responseRows(resp) {
         }
     }
     if (resp.rpl !== undefined) {
+        const renc = resp.ciphered ? ' (encrypted)' : '';
         rows.push(['Response packet', 'Response Packet Length ' + resp.rpl + ' · Response Header Length ' + resp.rhl]);
         rows.push(['TAR', '0x' + resp.tar]);
-        rows.push(['CNTR', '0x' + resp.cntr]);
-        rows.push(['PCNTR', resp.pcntr]);
+        rows.push(['CNTR' + renc, '0x' + resp.cntr]);
+        rows.push(['PCNTR' + renc, resp.pcntr]);
         const st = resp.status || {};
         rows.push(['Status', '0x' + st.code + (st.name ? ' — ' + st.name : '')]);
-        if (resp.rc_cc_ds) rows.push(['RC/CC/DS', resp.rc_cc_ds]);
+        if (resp.rc_cc_ds) rows.push(['RC/CC/DS' + renc, resp.rc_cc_ds]);
         if (resp.data) rows.push(['Response data', resp.data]);
     }
 
@@ -763,23 +764,27 @@ function cmdRows(cmd) {
             rows.push(['KIc', 'key ' + sec.kic.key + ' — ' + sec.kic.algo]);
             rows.push(['KID', 'key ' + sec.kid.key + ' — ' + sec.kid.algo]);
             rows.push(['TAR', '0x' + sec.tar]);
-            rows.push(['CNTR', '0x' + sec.cntr]);
-            rows.push(['PCNTR', sec.pcntr]);
-            if (sec.rc_cc_ds) rows.push(['RC/CC/DS', sec.rc_cc_ds]);
+            // When the packet is ciphered, CNTR/PCNTR/RC-CC-DS on the wire
+            // are ciphertext (TS 102 225 Table 2 note 1) — not real values.
+            const enc = sec.ciphered ? ' (encrypted)' : '';
+            rows.push(['CNTR' + enc, '0x' + sec.cntr]);
+            rows.push(['PCNTR' + enc, sec.pcntr]);
+            if (sec.rc_cc_ds) rows.push(['RC/CC/DS' + enc, sec.rc_cc_ds]);
             rows.push(['Secured data', sec.data]);
         }
 
         const rp = t.response_packet;
-        if (rp && !rp.raw) {
-            rows.push(['Response packet', 'Response Packet Length ' + rp.rpl + ' · Response Header Length ' + rp.rhl]);
-            rows.push(['TAR', '0x' + rp.tar]);
-            rows.push(['CNTR', '0x' + rp.cntr]);
-            rows.push(['PCNTR', rp.pcntr]);
-            const st = rp.status || {};
-            rows.push(['Status', '0x' + st.code + (st.name ? ' — ' + st.name : '')]);
-            if (rp.rc_cc_ds) rows.push(['RC/CC/DS', rp.rc_cc_ds]);
-            rows.push(['Response data', rp.data]);
-        }
+    if (rp && !rp.raw) {
+        const renc = rp.ciphered ? ' (encrypted)' : '';
+        rows.push(['Response packet', 'Response Packet Length ' + rp.rpl + ' · Response Header Length ' + rp.rhl]);
+        rows.push(['TAR', '0x' + rp.tar]);
+        rows.push(['CNTR' + renc, '0x' + rp.cntr]);
+        rows.push(['PCNTR' + renc, rp.pcntr]);
+        const st = rp.status || {};
+        rows.push(['Status', '0x' + st.code + (st.name ? ' — ' + st.name : '')]);
+        if (rp.rc_cc_ds) rows.push(['RC/CC/DS' + renc, rp.rc_cc_ds]);
+        rows.push(['Response data', rp.data]);
+    }
     }
 
     if (!rows.length) return '';
@@ -1901,7 +1906,7 @@ function onFilterChange() {
 }
 
 // ──────────────────── Versioning ────────────────────
-const PWA_VERSION = '1.17.1';
+const PWA_VERSION = '1.18.0';
 const MIN_SERVER_VERSION = '1.0.0';
 
 function parseVersion(v) {

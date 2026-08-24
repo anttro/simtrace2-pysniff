@@ -2080,6 +2080,54 @@ class TestSwUiccSpecific(unittest.TestCase):
         self.assertIsNone(self._sw('6205')['name'])
 
 
+class TestSecuredCiphering(unittest.TestCase):
+    """Ciphered SCP80 packets: on-wire CNTR/PCNTR/RC are ciphertext
+    (TS 102 225 Table 2 note 1) — flagged, not shown as real values."""
+
+    def test_ciphered_packet_flagged(self):
+        # stk_test1-style SMS-PP DOWNLOAD secured packet (ciphering on):
+        # CNTR on the wire is ciphertext; the card's real counter (~200)
+        # is only recoverable after 3DES decryption.
+        from simtrace2_pysniff.server.decode import _decode_secured_packet
+        sec = bytes.fromhex('003815160115 15b000011830a44e4191ad45d0ec'
+                            '2a291315986468a539d248fcdce7952c31cd635baec'
+                            '7e93a5d567b59f6283316c0dad8603bf3'.replace(' ', ''))
+        r = _decode_secured_packet(sec)
+        self.assertTrue(r['ciphered'])
+        self.assertTrue(r['spi']['ciphering'])
+        self.assertEqual(r['cntr'], '1830A44E41')  # wire bytes kept, flagged
+
+    def test_unciphered_packet_plain_cntr(self):
+        # SPI1 = 0x10: counter present, NO ciphering, RC/CC/DS none →
+        # CNTR is genuine plaintext (e.g. 200 = 0x00000000C8).
+        from simtrace2_pysniff.server.decode import _decode_secured_packet
+        sec = bytes.fromhex('00100d10011515b0000100000000c800aabb')
+        r = _decode_secured_packet(sec)
+        self.assertFalse(r['ciphered'])
+        self.assertEqual(r['cntr'], '00000000C8')
+        self.assertNotIn('rc_cc_ds', r)
+
+    def test_response_packet_ciphered_flag(self):
+        from simtrace2_pysniff.server.decode import _decode_response_packet
+        body = bytes.fromhex('001f0a00000000000000500000ab12800101230d08a0000001510000000f9a9000')
+        r = _decode_response_packet(body, ciphered=True)
+        self.assertTrue(r['ciphered'])
+        r2 = _decode_response_packet(body)
+        self.assertFalse(r2['ciphered'])
+
+    def test_por_ciphered_via_context(self):
+        # GET RESPONSE after a ciphered ENVELOPE: the response packet's
+        # ciphered flag flows from the command's SPI2.b5 via prev context.
+        prev = {'ins': 0xC2, 'ins_name': 'ENVELOPE', 'sw1': '61',
+                'por_ciphered': True}
+        raw = bytes.fromhex('80c0000019' +
+                            '0271' +
+                            '001f0a00000000000000500000ab12800101230d08a0000001510000000f9a9000'[:0x19 * 2] +
+                            '9000')
+        r = decode_message(raw, prev=prev)
+        self.assertTrue(r['response']['ciphered'])
+
+
 class TestSpiBits(unittest.TestCase):
     """TS 102 225 §5.1.1: SPI1 b3 = ciphering, SPI2 b5 = PoR ciphering."""
 
