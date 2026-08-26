@@ -3,7 +3,21 @@
 import time
 import threading
 
-from ..gsmtap import GsmtapReceiver, GSMTAP_SIM_ATR, GSMTAP_SIM_APDU
+from ..gsmtap import (GsmtapReceiver, GSMTAP_SIM_ATR,
+                      GSMTAP_SIM_RST_EVENT, GSMTAP_SIM_VCC_EVENT)
+
+
+def gsmtap_msg_type(sub_type):
+    """Map a GSMTAP-SIM sub_type to a stored message type.
+
+    Custom sigrok-iso7816-stream line events (0x10/0x11) become 'rst'/'vcc';
+    everything except ATR defaults to 'tpdu'.
+    """
+    return {
+        GSMTAP_SIM_ATR: 'atr',
+        GSMTAP_SIM_RST_EVENT: 'rst',
+        GSMTAP_SIM_VCC_EVENT: 'vcc',
+    }.get(sub_type, 'tpdu')
 
 
 class GsmtapListener:
@@ -23,8 +37,7 @@ class GsmtapListener:
             sub_type, data = self._receiver.read_packet()
             if sub_type is None:
                 continue
-            msg_type = 'atr' if sub_type == GSMTAP_SIM_ATR else 'tpdu'
-            yield msg_type, data, 0
+            yield gsmtap_msg_type(sub_type), data, 0
 
 
 class DirectSniffer:

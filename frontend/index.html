@@ -124,6 +124,8 @@ body { font: 14px/1.5 system-ui, sans-serif; background: var(--bg); color: var(-
 .apdu-type { color: var(--text); font-weight: 600; min-width: 150px; }
 .apdu-type.atr { color: var(--green); }
 .apdu-type.pps { color: var(--yellow); }
+.apdu-type.rst { color: var(--warn); }
+.apdu-type.vcc { color: var(--accent); }
 .apdu-type.cat-proactive { font-weight: 700; color: var(--proactive); }
 .apdu-type.cat-tr { font-weight: 700; color: var(--tr); }
 .apdu-type.cat-envelope { color: var(--envelope); }
@@ -412,6 +414,13 @@ const INS_NAMES = {
 };
 
 // ──────────────────── UI Helpers ────────────────────
+function line_event_label(msg) {
+    const d = msg.decoded;
+    if (msg.type === 'rst') return d && d.event ? 'RESET ' + (d.event === 'reset asserted' ? 'ASSERTED' : 'DE-ASSERTED') : 'RESET';
+    if (msg.type === 'vcc') return d && d.event ? 'VCC ' + (d.event === 'power applied' ? 'ON' : 'OFF') : 'VCC';
+    return null;
+}
+
 function ins_label(msg) {
     if (msg.decoded && msg.decoded.cat_command) return msg.decoded.cat_command;
     if (msg.decoded && msg.decoded.ins_name) return msg.decoded.ins_name;
@@ -420,6 +429,8 @@ function ins_label(msg) {
     if (msg.type === 'change') return 'STATE CHANGE';
     if (msg.type === 'fidi') return 'FIDI';
     if (msg.type === 'gap') return 'CAPTURE GAP';
+    const le = line_event_label(msg);
+    if (le) return le;
     const d = msg.data;
     if (d && d.length >= 2) {
         const ins = d.slice(2, 4);
@@ -434,6 +445,8 @@ function _fallback_label(msg) {
     if (msg.type === 'change') return 'STATE CHANGE';
     if (msg.type === 'fidi') return 'FIDI';
     if (msg.type === 'gap') return 'CAPTURE GAP';
+    const le = line_event_label(msg);
+    if (le) return le;
     const data = msg.data;
     if (data && data.length >= 2) {
         const ins = data.slice(2, 4);
@@ -1504,6 +1517,19 @@ function showDetail(msg, entry) {
         return;
     }
 
+    if (decoded.type === 'rst' || decoded.type === 'vcc') {
+        const evName = decoded.event || (decoded.type === 'rst' ? 'reset event' : 'power event');
+        d.innerHTML = `<div class="detail-header"><strong>${ins_label(msg)}</strong><span style="color:var(--text-muted)">${detail_time_html(msg)}</span></div>
+            <div class="detail-body">
+                <table>
+                    <tr><td class="label">Event</td><td class="value">${evName}</td></tr>
+                    <tr><td class="label">Level</td><td class="value">${decoded.level || '?'}</td></tr>
+                    ${decoded.raw ? `<tr><td class="label">Raw</td><td class="hex">${decoded.raw}</td></tr>` : ''}
+                </table>
+            </div>`;
+        return;
+    }
+
     if (decoded.type === 'fidi') {
         d.innerHTML = `<div class="detail-header"><strong>Fi/Di Change</strong><span style="color:var(--text-muted)">${detail_time_html(msg)}</span></div>
             <div class="detail-body">
@@ -1951,7 +1977,8 @@ function renderMessages(skipScroll) {
         }
         const label = ins_label(m);
         const cat = command_cat(_ins_hex(m));
-        const typeCls = (m.type === 'atr' ? 'atr' : m.type === 'pps' ? 'pps' : '') +
+        const typeCls = (m.type === 'atr' ? 'atr' : m.type === 'pps' ? 'pps'
+            : m.type === 'rst' ? 'rst' : m.type === 'vcc' ? 'vcc' : '') +
             (cat ? ' cat-' + cat : '');
         const errs = error_names(m);
         const errBadge = errs ? `<span class="apdu-err" title="${errs.join(', ')}">⚠</span>` : '';
@@ -2484,7 +2511,7 @@ function onFilterChange() {
 }
 
 // ──────────────────── Versioning ────────────────────
-const PWA_VERSION = '1.20.2';
+const PWA_VERSION = '1.21.0';
 const MIN_SERVER_VERSION = '1.0.0';
 
 function parseVersion(v) {

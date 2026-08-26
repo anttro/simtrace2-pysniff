@@ -4,8 +4,19 @@ import os
 import tempfile
 import unittest
 
-from simtrace2_pysniff.server.capture import CaptureManager
+from simtrace2_pysniff.server.capture import CaptureManager, gsmtap_msg_type
 from simtrace2_pysniff.server.database import Database
+
+
+class TestGsmtapSubtypeMapping(unittest.TestCase):
+    def test_custom_line_event_subtypes(self):
+        self.assertEqual(gsmtap_msg_type(0x10), 'rst')
+        self.assertEqual(gsmtap_msg_type(0x11), 'vcc')
+
+    def test_standard_subtypes(self):
+        self.assertEqual(gsmtap_msg_type(0x00), 'tpdu')
+        self.assertEqual(gsmtap_msg_type(0x01), 'atr')
+        self.assertEqual(gsmtap_msg_type(0x02), 'tpdu')  # PPS combined
 
 
 class _FakeBackend:

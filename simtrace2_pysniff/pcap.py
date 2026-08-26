@@ -32,6 +32,8 @@ GSMTAP_SIM_APDU = 0x00
 GSMTAP_SIM_ATR = 0x01
 GSMTAP_SIM_PPS_REQ = 0x02
 GSMTAP_SIM_PPS_RSP = 0x03
+GSMTAP_SIM_RST_EVENT = 0x10  # sigrok-iso7816-stream custom sub-type
+GSMTAP_SIM_VCC_EVENT = 0x11  # sigrok-iso7816-stream custom sub-type
 _GSMTAP_HDR_FMT = '!BBBBHBBIBBBB'
 _GSMTAP_HDR_SIZE = struct.calcsize(_GSMTAP_HDR_FMT)  # 16 bytes
 
@@ -48,6 +50,8 @@ _SUB_TYPE_NAMES = {
     GSMTAP_SIM_ATR: 'atr',
     GSMTAP_SIM_PPS_REQ: 'pps',
     GSMTAP_SIM_PPS_RSP: 'pps',
+    GSMTAP_SIM_RST_EVENT: 'rst',
+    GSMTAP_SIM_VCC_EVENT: 'vcc',
 }
 
 # pcapng block types

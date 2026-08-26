@@ -9,7 +9,9 @@ from simtrace2_pysniff.pcap import (
     build_pcap, parse_pcap, parse_pcapng, wrap_gsmtap, extract_gsmtap,
     LINKTYPE_ETHERNET,
 )
-from simtrace2_pysniff.gsmtap import build_gsmtap_packet, GSMTAP_SIM_ATR, GSMTAP_SIM_APDU
+from simtrace2_pysniff.gsmtap import (build_gsmtap_packet, GSMTAP_SIM_ATR,
+                                      GSMTAP_SIM_APDU, GSMTAP_SIM_RST_EVENT,
+                                      GSMTAP_SIM_VCC_EVENT)
 
 
 def _gsmtap_hdr(sub_type):
@@ -52,6 +54,19 @@ class TestParsePcap(unittest.TestCase):
         self.assertEqual(parsed, [
             (1.0, 'atr', b'\x3b\x00'),
             (2.5, 'tpdu', b'\x80\xf2\x00\x00\x00'),
+        ])
+
+    def test_roundtrip_line_events(self):
+        # sigrok-iso7816-stream custom sub-types survive a PCAP round-trip.
+        packets = [
+            (_gsmtap_hdr(GSMTAP_SIM_RST_EVENT), b'\x01\x00\x00', 1.0),
+            (_gsmtap_hdr(GSMTAP_SIM_VCC_EVENT), b'\x00\x00\x00', 1.5),
+        ]
+        data = build_pcap(packets)
+        parsed = [(round(ts, 1), t, payload) for ts, t, payload in parse_pcap(data)]
+        self.assertEqual(parsed, [
+            (1.0, 'rst', b'\x01\x00\x00'),
+            (1.5, 'vcc', b'\x00\x00\x00'),
         ])
 
     def test_no_gsmtap(self):
@@ -197,7 +212,7 @@ class TestImportEndpoint(unittest.TestCase):
 class TestVersion(unittest.TestCase):
     def test_package_version(self):
         from simtrace2_pysniff import __version__
-        self.assertEqual(__version__, '1.20.2')
+        self.assertEqual(__version__, '1.21.0')
 
     def test_status_includes_version(self):
         import os

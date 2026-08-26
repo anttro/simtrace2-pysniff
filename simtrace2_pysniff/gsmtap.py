@@ -14,6 +14,10 @@ GSMTAP_SIM_APDU = 0x00
 GSMTAP_SIM_ATR = 0x01
 GSMTAP_SIM_PPS_REQ = 0x02
 GSMTAP_SIM_PPS_RSP = 0x03
+# Custom sub-types from the sigrok-iso7816-stream decoder
+# (github.com/anttro/sigrok_iso7816_stream): line-level events.
+GSMTAP_SIM_RST_EVENT = 0x10
+GSMTAP_SIM_VCC_EVENT = 0x11
 
 GSMTAP_UDP_PORT = 4729
 

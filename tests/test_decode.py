@@ -2307,5 +2307,44 @@ class TestClaDecode(unittest.TestCase):
         self.assertEqual(r['interclass'], 'ETSI-defined (SIM/GSM)')
 
 
+class TestLineEvents(unittest.TestCase):
+    """sigrok-iso7816-stream RST/VCC line events (GSMTAP 0x10/0x11)."""
+
+    def _dec(self, kind, payload):
+        from simtrace2_pysniff.server.decode import decode_line_event
+        return decode_line_event(bytes.fromhex(payload), kind)
+
+    def test_rst_asserted(self):
+        r = self._dec('rst', '010000')
+        self.assertEqual(r['type'], 'rst')
+        self.assertEqual(r['event'], 'reset asserted')
+        self.assertEqual(r['level'], 'low')
+
+    def test_rst_deasserted(self):
+        r = self._dec('rst', '000100')
+        self.assertEqual(r['event'], 'reset de-asserted')
+        self.assertEqual(r['level'], 'high')
+
+    def test_vcc_on(self):
+        r = self._dec('vcc', '010100')
+        self.assertEqual(r['event'], 'power applied')
+        self.assertEqual(r['level'], 'high')
+
+    def test_vcc_off(self):
+        r = self._dec('vcc', '000000')
+        self.assertEqual(r['event'], 'power removed')
+        self.assertEqual(r['level'], 'low')
+
+    def test_sniff_routing(self):
+        from simtrace2_pysniff.server.decode import decode_sniff_msg
+        self.assertEqual(decode_sniff_msg(b'\x01\x00\x00', 'rst')['type'], 'rst')
+        self.assertEqual(decode_sniff_msg(b'\x00\x01\x00', 'vcc')['type'], 'vcc')
+
+    def test_short_payload(self):
+        r = self._dec('rst', '01')
+        self.assertEqual(r['type'], 'rst')
+        self.assertNotIn('event', r)
+
+
 if __name__ == '__main__':
     unittest.main()

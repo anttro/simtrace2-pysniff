@@ -377,5 +377,16 @@ class Database:
                 if msg['flags'] & (CHANGE_FLAG_CARD_INSERT | CHANGE_FLAG_CARD_EJECT |
                                    CHANGE_FLAG_RESET_ASSERT | CHANGE_FLAG_RESET_DEASSERT):
                     states = {}
+            elif msg['type'] in ('rst', 'vcc'):
+                # sigrok-iso7816-stream line events: a reset assert or power
+                # removal destroys the card's selection state.  De-assert /
+                # power-on are markers only (the following ATR resets state).
+                data = row[4] if len(row) > 4 and row[4] else b''
+                if msg['type'] == 'rst':
+                    if data and data[0] == 1:  # asserted
+                        states = {}
+                else:  # vcc
+                    if data and data[0] == 0:  # power removed
+                        states = {}
             msgs.append(msg)
         return msgs

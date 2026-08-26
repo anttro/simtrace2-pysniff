@@ -4002,6 +4002,26 @@ def decode_change(flags):
     }
 
 
+def decode_line_event(raw_data, kind):
+    """Decode a sigrok-iso7816-stream RST/VCC line event (GSMTAP sub_type
+    0x10/0x11): payload [direction, level, reserved].
+
+    direction — RST: 1 = asserted (high→low), 0 = de-asserted (low→high);
+    VCC: 1 = power applied (low→high), 0 = removed (high→low).
+    level — resulting line level: 0 = low, 1 = high.
+    """
+    result = {'type': kind}
+    if raw_data and len(raw_data) >= 2:
+        direction, level = raw_data[0], raw_data[1]
+        if kind == 'rst':
+            result['event'] = 'reset asserted' if direction else 'reset de-asserted'
+        else:
+            result['event'] = 'power applied' if direction else 'power removed'
+        result['level'] = 'high' if level else 'low'
+        result['raw'] = raw_data.hex().upper()
+    return result
+
+
 def decode_data_flags(flags):
     """Decode SIMtrace2 sniff_data error flags into a list of names (or None)."""
     if not flags:
@@ -4260,6 +4280,8 @@ def decode_sniff_msg(raw_data, msg_type, flags=0, prev=None):
         return result
     if msg_type == 'change':
         return decode_change(flags)
+    if msg_type in ('rst', 'vcc'):
+        return decode_line_event(raw_data, msg_type)
     if msg_type == 'fidi' and raw_data:
         return decode_fidi(raw_data)
     if msg_type == 'atr':
