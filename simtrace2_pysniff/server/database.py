@@ -230,7 +230,7 @@ class Database:
             'data': data_blob.hex(),
             'flags': flags,
         }
-        if row[3] in ('tpdu', 'change', 'fidi', 'atr', 'pps'):
+        if row[3] in ('tpdu', 'change', 'fidi', 'atr', 'pps', 'rst', 'vcc'):
             try:
                 from .decode import decode_sniff_msg
                 msg['decoded'] = decode_sniff_msg(data_blob, row[3], flags, prev=prev)

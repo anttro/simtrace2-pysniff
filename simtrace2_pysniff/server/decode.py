@@ -4018,14 +4018,28 @@ def decode_line_event(raw_data, kind):
     direction — RST: 1 = asserted (high→low), 0 = de-asserted (low→high);
     VCC: 1 = power applied (low→high), 0 = removed (high→low).
     level — resulting line level: 0 = low, 1 = high.
+
+    ``event`` is the canonical value; ``label`` is the human-facing
+    summary (e.g. RST de-asserted → "ATR STARTS", VCC applied →
+    "VCC ON (power-up)").
     """
     result = {'type': kind}
     if raw_data and len(raw_data) >= 2:
         direction, level = raw_data[0], raw_data[1]
         if kind == 'rst':
-            result['event'] = 'reset asserted' if direction else 'reset de-asserted'
+            if direction:
+                result['event'] = 'reset asserted'
+                result['label'] = 'RESET ASSERTED'
+            else:
+                result['event'] = 'reset de-asserted'
+                result['label'] = 'ATR STARTS'
         else:
-            result['event'] = 'power applied' if direction else 'power removed'
+            if direction:
+                result['event'] = 'power applied'
+                result['label'] = 'VCC ON (power-up)'
+            else:
+                result['event'] = 'power removed'
+                result['label'] = 'VCC OFF (power-down)'
         result['level'] = 'high' if level else 'low'
         result['raw'] = raw_data.hex().upper()
     return result

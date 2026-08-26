@@ -2357,22 +2357,40 @@ class TestLineEvents(unittest.TestCase):
         r = self._dec('rst', '010000')
         self.assertEqual(r['type'], 'rst')
         self.assertEqual(r['event'], 'reset asserted')
+        self.assertEqual(r['label'], 'RESET ASSERTED')
         self.assertEqual(r['level'], 'low')
 
     def test_rst_deasserted(self):
         r = self._dec('rst', '000100')
         self.assertEqual(r['event'], 'reset de-asserted')
+        self.assertEqual(r['label'], 'ATR STARTS')
         self.assertEqual(r['level'], 'high')
 
     def test_vcc_on(self):
         r = self._dec('vcc', '010100')
         self.assertEqual(r['event'], 'power applied')
+        self.assertEqual(r['label'], 'VCC ON (power-up)')
         self.assertEqual(r['level'], 'high')
 
     def test_vcc_off(self):
         r = self._dec('vcc', '000000')
         self.assertEqual(r['event'], 'power removed')
+        self.assertEqual(r['label'], 'VCC OFF (power-down)')
         self.assertEqual(r['level'], 'low')
+
+    def test_db_roundtrip_label(self):
+        # rst/vcc must be decoded server-side (database.py dispatch) so the
+        # PWA receives decoded.label/event, not just the raw bytes.
+        import tempfile
+        from simtrace2_pysniff.server.database import Database
+        with tempfile.NamedTemporaryFile(suffix='.db') as tmp:
+            db = Database(tmp.name)
+            sid = db.create_session('capture')
+            db.insert_message(sid, 0.1, 'rst', bytes.fromhex('000100'), 0)
+            db.insert_message(sid, 0.2, 'vcc', bytes.fromhex('010100'), 0)
+            msgs = db.get_messages(sid)
+            self.assertEqual(msgs[0]['decoded']['label'], 'ATR STARTS')
+            self.assertEqual(msgs[1]['decoded']['label'], 'VCC ON (power-up)')
 
     def test_sniff_routing(self):
         from simtrace2_pysniff.server.decode import decode_sniff_msg
