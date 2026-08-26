@@ -10,6 +10,15 @@ from ..gsmtap import (GsmtapReceiver, GSMTAP_SIM_ATR,
                       GSMTAP_SIM_RST_EVENT, GSMTAP_SIM_VCC_EVENT)
 
 
+def _ts():
+    """Local-time stamp for server-side capture log lines."""
+    return time.strftime('%Y-%m-%d %H:%M:%S')
+
+
+def _log(msg):
+    print(f'[{_ts()}] {msg}', file=sys.stderr)
+
+
 def gsmtap_msg_type(sub_type):
     """Map a GSMTAP-SIM sub_type to a stored message type.
 
@@ -51,8 +60,7 @@ class GsmtapListener:
                 # the whole capture — drop it and keep listening.
                 self._dropped += 1
                 if self._dropped <= 1 or self._dropped % 100 == 0:
-                    print(f'GSMTAP: dropped packet ({self._dropped}): {e}',
-                          file=sys.stderr)
+                    _log(f'GSMTAP: dropped packet ({self._dropped}): {e}')
                 continue
             if sub_type is None:
                 continue
@@ -147,8 +155,7 @@ class CaptureManager:
         self._thread.start()
 
         self._stop_event.clear()
-        print(f'Capture started (mode={mode}, session={self._session_id})',
-              file=sys.stderr)
+        _log(f'Capture started (mode={mode}, session={self._session_id})')
         self._log_thread = threading.Thread(target=self._log_loop, daemon=True)
         self._log_thread.start()
 
@@ -169,12 +176,11 @@ class CaptureManager:
         empty = self._db.count_messages(sid) == 0
         if empty:
             self._db.delete_session(sid)
-            print(f'Capture stopped: empty session discarded (session={sid})',
-                  file=sys.stderr)
+            _log(f'Capture stopped: empty session discarded (session={sid})')
             return None
         self._db.close_session(sid)
-        print(f'Capture stopped: session={sid} messages={self._msg_count} '
-              f'bytes={self._byte_count}', file=sys.stderr)
+        _log(f'Capture stopped: session={sid} messages={self._msg_count} '
+             f'bytes={self._byte_count}')
         return sid
 
     def _capture_loop(self):
@@ -190,14 +196,12 @@ class CaptureManager:
                     self._byte_count += len(data)
                     self._latest_msg_id = mid
                 except Exception as e:
-                    print(f'Capture: insert error, dropping msg: {e}',
-                          file=sys.stderr)
+                    _log(f'Capture: insert error, dropping msg: {e}')
                     continue
         except Exception:
             # The capture thread died unexpectedly (not a user stop).
             sid = self._session_id
-            print(f'ERROR: capture thread stopped on error (session={sid}):',
-                  file=sys.stderr)
+            _log(f'ERROR: capture thread stopped on error (session={sid}):')
             traceback.print_exc()
             self._stop_event.set()
             if sid is not None:
@@ -213,6 +217,6 @@ class CaptureManager:
             if self._session_id is None:
                 break
             dropped = getattr(self._backend, 'dropped', 0)
-            print(f'Capture alive: session={self._session_id} '
-                  f'messages={self._msg_count} bytes={self._byte_count} '
-                  f'dropped={dropped}', file=sys.stderr)
+            _log(f'Capture alive: session={self._session_id} '
+                 f'messages={self._msg_count} bytes={self._byte_count} '
+                 f'dropped={dropped}')

@@ -35,7 +35,10 @@ def main():
     p.add_argument('--capture', choices=['gsmtap', 'direct', 'disabled'], default='gsmtap',
                    help='Capture mode: gsmtap (listen UDP 4729), direct (SIMtrace2 USB), or disabled (no capture)')
     p.add_argument('--gsmtap-port', type=int, default=4729,
-                   help='UDP port for GSMTAP listener (default: 4729)')
+                    help='UDP port for GSMTAP listener (default: 4729)')
+    p.add_argument('--log-interval', type=float, default=60.0,
+                    help='Seconds between capture liveness heartbeat logs '
+                         '(default: 60.0)')
     p.add_argument('--web-dir', default=_default_web_dir(), metavar='PATH',
                    help='Directory with the simtrace-analyser PWA static files to serve (default: <repo>/frontend)')
     args = p.parse_args()
@@ -45,10 +48,10 @@ def main():
     capture = None
     if args.capture == 'gsmtap':
         backend = GsmtapListener(bind_port=args.gsmtap_port)
-        capture = CaptureManager(backend, db)
+        capture = CaptureManager(backend, db, log_interval=args.log_interval)
     elif args.capture == 'direct':
         backend = DirectSniffer()
-        capture = CaptureManager(backend, db)
+        capture = CaptureManager(backend, db, log_interval=args.log_interval)
 
     RequestHandler.db = db
     RequestHandler.capture = capture
