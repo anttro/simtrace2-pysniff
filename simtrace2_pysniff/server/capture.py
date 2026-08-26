@@ -1,7 +1,10 @@
 """Capture backends: GSMTAP listener and direct SIMtrace2 sniffer."""
 
-import time
+import struct
+import sys
 import threading
+import time
+import traceback
 
 from ..gsmtap import (GsmtapReceiver, GSMTAP_SIM_ATR,
                       GSMTAP_SIM_RST_EVENT, GSMTAP_SIM_VCC_EVENT)
@@ -24,17 +27,33 @@ class GsmtapListener:
     def __init__(self, bind_port=4729):
         self._receiver = GsmtapReceiver(bind_port=bind_port)
         self._running = False
+        self._dropped = 0
 
     def start(self):
         self._running = True
+        self._dropped = 0
 
     def stop(self):
         self._running = False
         self._receiver.close()
 
+    @property
+    def dropped(self):
+        return self._dropped
+
     def iter_messages(self):
         while self._running:
-            sub_type, data, flags = self._receiver.read_packet()
+            try:
+                sub_type, data, flags = self._receiver.read_packet()
+            except (ValueError, struct.error) as e:
+                # A malformed or non-SIM GSMTAP datagram (a different
+                # GSMTAP packet type, a truncated frame, …) must not kill
+                # the whole capture — drop it and keep listening.
+                self._dropped += 1
+                if self._dropped <= 1 or self._dropped % 100 == 0:
+                    print(f'GSMTAP: dropped packet ({self._dropped}): {e}',
+                          file=sys.stderr)
+                continue
             if sub_type is None:
                 continue
             yield gsmtap_msg_type(sub_type), data, flags
@@ -75,13 +94,18 @@ class DirectSniffer:
 
 
 class CaptureManager:
-    def __init__(self, backend, db):
+    def __init__(self, backend, db, log_interval=60.0):
         self._backend = backend
         self._db = db
         self._session_id = None
         self._thread = None
+        self._log_thread = None
+        self._stop_event = threading.Event()
         self._start_time = 0.0
         self._latest_msg_id = 0
+        self._msg_count = 0
+        self._byte_count = 0
+        self._log_interval = log_interval
 
     @property
     def active(self):
@@ -115,32 +139,80 @@ class CaptureManager:
         self._session_id = self._db.create_session(mode)
         self._start_time = time.monotonic()
         self._latest_msg_id = 0
+        self._msg_count = 0
+        self._byte_count = 0
         self._backend.start()
 
         self._thread = threading.Thread(target=self._capture_loop, daemon=True)
         self._thread.start()
+
+        self._stop_event.clear()
+        print(f'Capture started (mode={mode}, session={self._session_id})',
+              file=sys.stderr)
+        self._log_thread = threading.Thread(target=self._log_loop, daemon=True)
+        self._log_thread.start()
 
         return self._session_id
 
     def stop_session(self):
         if self._session_id is None:
             return None
+        self._stop_event.set()
         self._backend.stop()
         if self._thread is not None:
             self._thread.join(timeout=2.0)
+        if self._log_thread is not None:
+            self._log_thread.join(timeout=2.0)
         sid = self._session_id
         self._session_id = None
         self._start_time = 0.0
-        if self._db.count_messages(sid) == 0:
+        empty = self._db.count_messages(sid) == 0
+        if empty:
             self._db.delete_session(sid)
+            print(f'Capture stopped: empty session discarded (session={sid})',
+                  file=sys.stderr)
             return None
         self._db.close_session(sid)
+        print(f'Capture stopped: session={sid} messages={self._msg_count} '
+              f'bytes={self._byte_count}', file=sys.stderr)
         return sid
 
     def _capture_loop(self):
-        for msg_type, data, flags in self._backend.iter_messages():
+        try:
+            for msg_type, data, flags in self._backend.iter_messages():
+                if self._session_id is None:
+                    break
+                try:
+                    elapsed = round(time.monotonic() - self._start_time, 3)
+                    mid = self._db.insert_message(
+                        self._session_id, elapsed, msg_type, data, flags)
+                    self._msg_count += 1
+                    self._byte_count += len(data)
+                    self._latest_msg_id = mid
+                except Exception as e:
+                    print(f'Capture: insert error, dropping msg: {e}',
+                          file=sys.stderr)
+                    continue
+        except Exception:
+            # The capture thread died unexpectedly (not a user stop).
+            sid = self._session_id
+            print(f'ERROR: capture thread stopped on error (session={sid}):',
+                  file=sys.stderr)
+            traceback.print_exc()
+            self._stop_event.set()
+            if sid is not None:
+                try:
+                    self._db.close_session(sid)
+                except Exception:
+                    pass
+                self._session_id = None
+            return
+
+    def _log_loop(self):
+        while not self._stop_event.wait(self._log_interval):
             if self._session_id is None:
                 break
-            elapsed = round(time.monotonic() - self._start_time, 3)
-            mid = self._db.insert_message(self._session_id, elapsed, msg_type, data, flags)
-            self._latest_msg_id = mid
+            dropped = getattr(self._backend, 'dropped', 0)
+            print(f'Capture alive: session={self._session_id} '
+                  f'messages={self._msg_count} bytes={self._byte_count} '
+                  f'dropped={dropped}', file=sys.stderr)

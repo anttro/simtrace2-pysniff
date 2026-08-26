@@ -113,6 +113,13 @@ simtrace2-pysniff-server --capture direct
 simtrace2-pysniff-server --capture disabled
 ```
 
+The server logs its capture liveness to stderr: `Capture started` on
+begin, a periodic `Capture alive: session=N messages=M bytes=B dropped=D`
+heartbeat, and `Capture stopped` (or `ERROR: capture thread stopped on
+error …` if the capture thread died unexpectedly). A mis-framed or
+non-SIM GSMTAP datagram is dropped and counted (`dropped`) rather than
+silently killing the capture.
+
 The GSMTAP listener also accepts the **sigrok-iso7816-stream** decoder
 (https://github.com/anttro/sigrok_iso7816_stream) — an FX2-logic-analyzer
 passive SIM sniffer that emits the same GSMTAP-SIM format on UDP 4729. Its
