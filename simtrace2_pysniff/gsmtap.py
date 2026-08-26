@@ -19,6 +19,10 @@ GSMTAP_SIM_PPS_RSP = 0x03
 GSMTAP_SIM_RST_EVENT = 0x10
 GSMTAP_SIM_VCC_EVENT = 0x11
 
+# Per-packet flags carried in the GSMTAP header `res` byte (libosmocore
+# gsmtap.h).  sigrok-iso7816-stream sets BAD_FCS on a desynced TPDU.
+GSMTAP_FLAG_BAD_FCS = 0x01
+
 GSMTAP_UDP_PORT = 4729
 
 _GSMTAP_HDR_FMT = '!BBBBHBBIBBBB'  # 16 bytes, big-endian
@@ -79,27 +83,29 @@ class GsmtapReceiver:
     def read_packet(self):
         """Block until a GSMTAP-SIM packet arrives.
 
-        Returns ``(sub_type, data)`` on success or ``(None, None)``
-        on timeout.  *sub_type* is ``GSMTAP_SIM_ATR`` or ``GSMTAP_SIM_APDU``.
+        Returns ``(sub_type, data, flags)`` on success or ``(None, None, 0)``
+        on timeout.  *sub_type* is ``GSMTAP_SIM_ATR``/``GSMTAP_SIM_APDU`` or
+        a custom sub-type; *flags* are the per-packet bits from the GSMTAP
+        header ``res`` byte (see ``GSMTAP_FLAG_*``).
         Raises ``ValueError`` for non-SIM or unknown GSMTAP packets.
         """
         try:
             packet, addr = self._sock.recvfrom(65536)
         except (socket.timeout, OSError):
-            return None, None
+            return None, None, 0
 
         if len(packet) < _GSMTAP_HDR_SIZE:
             raise ValueError(f'GSMTAP packet too short: {len(packet)} bytes')
 
         (version, hdr_len, pkt_type, _timeslot, _arfcn, _noise, _signal,
-         _frame, sub_type, _antenna, sub_slot, _res) = \
+         _frame, sub_type, _antenna, sub_slot, res) = \
             struct.unpack(_GSMTAP_HDR_FMT, packet[:_GSMTAP_HDR_SIZE])
 
         if pkt_type != GSMTAP_TYPE_SIM:
             raise ValueError(f'Not a GSMTAP SIM packet (type={pkt_type})')
 
         data = packet[_GSMTAP_HDR_SIZE:]
-        return sub_type, data
+        return sub_type, data, res
 
     def close(self):
         self._sock.close()

@@ -34,10 +34,10 @@ class GsmtapListener:
 
     def iter_messages(self):
         while self._running:
-            sub_type, data = self._receiver.read_packet()
+            sub_type, data, flags = self._receiver.read_packet()
             if sub_type is None:
                 continue
-            yield gsmtap_msg_type(sub_type), data, 0
+            yield gsmtap_msg_type(sub_type), data, flags
 
 
 class DirectSniffer:

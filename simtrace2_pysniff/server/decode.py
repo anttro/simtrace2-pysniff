@@ -4030,6 +4030,19 @@ def decode_data_flags(flags):
     return names or None
 
 
+def gsmtap_flag_names(flags):
+    """Decode the GSMTAP header ``res`` per-packet flag bits into a list of
+    human-readable names (or None).
+
+    GSMTAP_FLAG_BAD_FCS is set by the sigrok-iso7816-stream decoder on a
+    desynced TPDU (mis-framed exchange / implausible status word).
+    """
+    names = []
+    if flags & 0x01:
+        names.append('bad FCS (desynced)')
+    return names or None
+
+
 def decode_fidi(raw_data):
     """Decode a SIMtrace2 sniff_fidi payload (1-byte Fi/Di)."""
     if len(raw_data) < 1:
@@ -4274,27 +4287,31 @@ def decode_sniff_msg(raw_data, msg_type, flags=0, prev=None):
     if msg_type == 'tpdu' and raw_data:
         result = decode_message(raw_data, prev=prev)
         if result is not None:
-            errs = decode_data_flags(flags)
+            errs = (decode_data_flags(flags) or []) + (gsmtap_flag_names(flags) or [])
             if errs:
                 result['errors'] = errs
         return result
     if msg_type == 'change':
         return decode_change(flags)
     if msg_type in ('rst', 'vcc'):
-        return decode_line_event(raw_data, msg_type)
+        result = decode_line_event(raw_data, msg_type)
+        errs = gsmtap_flag_names(flags)
+        if errs:
+            result['errors'] = errs
+        return result
     if msg_type == 'fidi' and raw_data:
         return decode_fidi(raw_data)
     if msg_type == 'atr':
         result = _decode_atr(raw_data)
         if result is not None:
-            errs = decode_data_flags(flags)
+            errs = (decode_data_flags(flags) or []) + (gsmtap_flag_names(flags) or [])
             if errs:
                 result['errors'] = errs
         return result
     if msg_type == 'pps':
         result = _decode_pps(raw_data)
         if result is not None:
-            errs = decode_data_flags(flags)
+            errs = (decode_data_flags(flags) or []) + (gsmtap_flag_names(flags) or [])
             if errs:
                 result['errors'] = errs
         return result

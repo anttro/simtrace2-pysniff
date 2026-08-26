@@ -224,22 +224,22 @@ def _frame_to_udp_payload(frame, linktype):
 
 
 def _parse_gsmtap_hdr(data):
-    """Parse a GSMTAP header; return (sub_type, payload) or None if not SIM."""
+    """Parse a GSMTAP header; return (sub_type, payload, flags) or None."""
     if len(data) < _GSMTAP_HDR_SIZE:
         return None
     (version, hdr_len, pkt_type, _ts, _arfcn, _noise, _signal,
-     _frame, sub_type, _ant, _slot, _res) = struct.unpack(
+     _frame, sub_type, _ant, _slot, res) = struct.unpack(
         _GSMTAP_HDR_FMT, data[:_GSMTAP_HDR_SIZE])
     if version != 0x02 or pkt_type != GSMTAP_TYPE_SIM:
         return None
     hdr_size = hdr_len * 4
     if hdr_size < _GSMTAP_HDR_SIZE or len(data) < hdr_size:
         return None
-    return sub_type, data[hdr_size:]
+    return sub_type, data[hdr_size:], res
 
 
 def _scan_gsmtap(frame):
-    """Fallback: scan a frame for a GSMTAP-SIM header, return (sub_type, payload)."""
+    """Fallback: scan a frame for a GSMTAP-SIM header, return (sub_type, payload, flags)."""
     for off in range(0, len(frame) - _GSMTAP_HDR_SIZE + 1):
         parsed = _parse_gsmtap_hdr(frame[off:])
         if parsed is not None:
@@ -250,8 +250,8 @@ def _scan_gsmtap(frame):
 def extract_gsmtap(frame, linktype):
     """Extract a GSMTAP-SIM message from a link-layer frame.
 
-    Returns ``(sub_type, payload)`` or ``None`` if the frame carries no
-    GSMTAP-SIM data.
+    Returns ``(sub_type, payload, flags)`` or ``None`` if the frame carries
+    no GSMTAP-SIM data.
     """
     udp = _frame_to_udp_payload(frame, linktype)
     if udp:
@@ -304,10 +304,10 @@ def parse_pcap(data):
         parsed = extract_gsmtap(frame, linktype)
         if parsed is None:
             continue
-        sub_type, payload = parsed
+        sub_type, payload, flags = parsed
         msg_type = _gsmtap_to_msg(sub_type, payload)
         if msg_type is not None:
-            yield ts, msg_type, payload
+            yield ts, msg_type, payload, flags
 
 
 def parse_pcapng(data):
@@ -354,10 +354,10 @@ def parse_pcapng(data):
                 ts = _scale_ts(ts_hi, ts_lo, tsresols.get(iface))
                 parsed = extract_gsmtap(frame, linktypes.get(iface))
                 if parsed is not None:
-                    sub_type, payload = parsed
+                    sub_type, payload, flags = parsed
                     msg_type = _gsmtap_to_msg(sub_type, payload)
                     if msg_type is not None:
-                        yield ts, msg_type, payload
+                        yield ts, msg_type, payload, flags
         elif block_type == _PNG_SPB and len(body) >= 4:
             cap_len, = struct.unpack(endian + 'I', body[:4])
             if cap_len <= len(body) - 4:
@@ -365,10 +365,10 @@ def parse_pcapng(data):
                 # SPB has no timestamp and no interface; use file-order ts.
                 parsed = _scan_gsmtap(frame)
                 if parsed is not None:
-                    sub_type, payload = parsed
+                    sub_type, payload, flags = parsed
                     msg_type = _gsmtap_to_msg(sub_type, payload)
                     if msg_type is not None:
-                        yield float(spb_ts), msg_type, payload
+                        yield float(spb_ts), msg_type, payload, flags
                         spb_ts += 1
 
 

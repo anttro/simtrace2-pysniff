@@ -50,7 +50,7 @@ class TestParsePcap(unittest.TestCase):
             (_gsmtap_hdr(GSMTAP_SIM_APDU), b'\x80\xf2\x00\x00\x00', 2.5),
         ]
         data = build_pcap(packets)
-        parsed = [(round(ts, 1), t, payload) for ts, t, payload in parse_pcap(data)]
+        parsed = [(round(ts, 1), t, payload) for ts, t, payload, _f in parse_pcap(data)]
         self.assertEqual(parsed, [
             (1.0, 'atr', b'\x3b\x00'),
             (2.5, 'tpdu', b'\x80\xf2\x00\x00\x00'),
@@ -63,7 +63,7 @@ class TestParsePcap(unittest.TestCase):
             (_gsmtap_hdr(GSMTAP_SIM_VCC_EVENT), b'\x00\x00\x00', 1.5),
         ]
         data = build_pcap(packets)
-        parsed = [(round(ts, 1), t, payload) for ts, t, payload in parse_pcap(data)]
+        parsed = [(round(ts, 1), t, payload) for ts, t, payload, _f in parse_pcap(data)]
         self.assertEqual(parsed, [
             (1.0, 'rst', b'\x01\x00\x00'),
             (1.5, 'vcc', b'\x00\x00\x00'),
@@ -77,6 +77,18 @@ class TestParsePcap(unittest.TestCase):
         data = build_pcap(packets)
         self.assertEqual(list(parse_pcap(data)), [])
 
+    def test_bad_fcs_flag_roundtrip(self):
+        # GSMTAP_FLAG_BAD_FCS (res byte 0x01) survives a PCAP round-trip.
+        from simtrace2_pysniff.gsmtap import GSMTAP_FLAG_BAD_FCS
+        hdr = bytearray(_gsmtap_hdr(GSMTAP_SIM_APDU))
+        hdr[15] |= GSMTAP_FLAG_BAD_FCS
+        packets = [(bytes(hdr), b'\x80\xf2\x00\x00', 1.0),
+                   (_gsmtap_hdr(GSMTAP_SIM_APDU), b'\x80\xf2\x00\x00', 2.0)]
+        data = build_pcap(packets)
+        parsed = list(parse_pcap(data))
+        self.assertEqual(parsed[0], (1.0, 'tpdu', b'\x80\xf2\x00\x00', GSMTAP_FLAG_BAD_FCS))
+        self.assertEqual(parsed[1], (2.0, 'tpdu', b'\x80\xf2\x00\x00', 0))
+
 
 class TestParsePcapng(unittest.TestCase):
     def test_parse(self):
@@ -84,7 +96,7 @@ class TestParsePcapng(unittest.TestCase):
             (_gsmtap_hdr(GSMTAP_SIM_ATR), b'\x3b\x04', 0, 0),
             (_gsmtap_hdr(GSMTAP_SIM_APDU), b'\x80\xf2\x00\x00\x00', 0, 1),
         ])
-        parsed = [(t, payload) for _ts, t, payload in parse_pcapng(data)]
+        parsed = [(t, payload) for _ts, t, payload, _f in parse_pcapng(data)]
         self.assertEqual(parsed, [
             ('atr', b'\x3b\x04'),
             ('tpdu', b'\x80\xf2\x00\x00\x00'),
@@ -212,7 +224,7 @@ class TestImportEndpoint(unittest.TestCase):
 class TestVersion(unittest.TestCase):
     def test_package_version(self):
         from simtrace2_pysniff import __version__
-        self.assertEqual(__version__, '1.21.0')
+        self.assertEqual(__version__, '1.22.0')
 
     def test_status_includes_version(self):
         import os

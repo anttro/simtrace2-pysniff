@@ -119,7 +119,11 @@ passive SIM sniffer that emits the same GSMTAP-SIM format on UDP 4729. Its
 custom sub-types for RST/VCC line events (`0x10`/`0x11`, added for
 compatibility with that project) are decoded as `RESET ASSERTED/DE-ASSERTED`
 and `VCC ON/OFF` timeline markers, and a reset-assert or power-removal
-correctly invalidates the file-selection tracking.
+correctly invalidates the file-selection tracking. GSMTAP packets carrying
+the `GSMTAP_FLAG_BAD_FCS` desync flag (set by that decoder on mis-framed
+exchanges) are surfaced as a flagged/desynced entry in the capture timeline,
+so such artefacts are easy to spot when reviewing a capture rather than
+silently altering the decode.
 
 Server options:
 

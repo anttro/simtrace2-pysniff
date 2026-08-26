@@ -2340,6 +2340,22 @@ class TestLineEvents(unittest.TestCase):
         self.assertEqual(decode_sniff_msg(b'\x01\x00\x00', 'rst')['type'], 'rst')
         self.assertEqual(decode_sniff_msg(b'\x00\x01\x00', 'vcc')['type'], 'vcc')
 
+    def test_bad_fcs_flag_marks_tpdu(self):
+        from simtrace2_pysniff.server.decode import decode_sniff_msg
+        r = decode_sniff_msg(b'\x80\xf2\x00\x00\x00', 'tpdu', flags=0x01)
+        self.assertIn('bad FCS (desynced)', r['errors'])
+
+    def test_bad_fcs_flag_marks_rst(self):
+        from simtrace2_pysniff.server.decode import decode_sniff_msg
+        r = decode_sniff_msg(b'\x01\x00\x00', 'rst', flags=0x01)
+        self.assertIn('bad FCS (desynced)', r['errors'])
+        self.assertEqual(r['event'], 'reset asserted')
+
+    def test_no_fcs_flag_no_error(self):
+        from simtrace2_pysniff.server.decode import decode_sniff_msg
+        r = decode_sniff_msg(b'\x01\x00\x00', 'rst', flags=0)
+        self.assertNotIn('errors', r)
+
     def test_short_payload(self):
         r = self._dec('rst', '01')
         self.assertEqual(r['type'], 'rst')

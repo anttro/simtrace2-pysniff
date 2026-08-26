@@ -331,9 +331,9 @@ class RequestHandler(BaseHTTPRequestHandler):
         first_ts = packets[0][0]
         last_ts = packets[-1][0]
         rows = []
-        for ts, msg_type, payload in packets:
+        for ts, msg_type, payload, flags in packets:
             elapsed = round(ts - first_ts, 6) if ts is not None else 0.0
-            rows.append((max(0.0, elapsed), msg_type, payload, 0))
+            rows.append((max(0.0, elapsed), msg_type, payload, flags))
         self.db.insert_messages(session_id, rows)
         # Use the packet timestamps as the session window when they are real
         # (classic pcap / pcapng EPB).  pcapng SPB-only files have synthetic
