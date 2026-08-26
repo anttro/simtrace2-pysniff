@@ -4,6 +4,8 @@ Pure Python, no dependencies.  Decodes raw TPDU bytes captured by
 the SIMtrace2 sniffer into structured dicts for the PWA to display.
 """
 
+from ..gsmtap import GSMTAP_FLAG_BAD_FCS
+
 # ──────────────────── Status Word names ────────────────────
 
 SW_NAMES = {
@@ -4038,7 +4040,7 @@ def gsmtap_flag_names(flags):
     desynced TPDU (mis-framed exchange / implausible status word).
     """
     names = []
-    if flags & 0x01:
+    if flags & GSMTAP_FLAG_BAD_FCS:
         names.append('bad FCS (desynced)')
     return names or None
 

@@ -1204,6 +1204,20 @@ class TestFileDecoders(unittest.TestCase):
 
 
 class TestSelectionTracking(unittest.TestCase):
+    def test_bad_fcs_roundtrip(self):
+        # GSMTAP BAD_FCS flag stored via insert_message must surface as a
+        # decode error in the DB → frontend path (not just the direct call).
+        import tempfile
+        from simtrace2_pysniff.server.database import Database
+        from simtrace2_pysniff.gsmtap import GSMTAP_FLAG_BAD_FCS
+        with tempfile.NamedTemporaryFile(suffix='.db') as tmp:
+            db = Database(tmp.name)
+            sid = db.create_session('capture')
+            db.insert_message(sid, 0.1, 'tpdu', bytes.fromhex('80f2000000'),
+                              GSMTAP_FLAG_BAD_FCS)
+            msgs = db.get_messages(sid)
+            self.assertIn('bad FCS (desynced)', msgs[0]['decoded']['errors'])
+
     def test_select_then_read(self):
         import tempfile
         from simtrace2_pysniff.server.database import Database
