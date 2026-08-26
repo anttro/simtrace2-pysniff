@@ -3370,19 +3370,26 @@ def _decode_psloci(raw, p1=None):
 
 
 def _decode_nai(raw, p1=None):
-    """ISIM identity files (EF_IMPI/DOMAIN/IMPU): BER-TLV tag 0x80 + ASCII value."""
+    """ISIM identity files (EF_IMPI/DOMAIN/IMPU): BER-TLV tag 0x80/0x81 + value.
+
+    An erased or unused record is all-0xFF, or a lone identity tag, or a
+    tag with a zero-length value (e.g. ``80 00`` + FF filler) — these are
+    reported as empty rather than decoded as text.  Only the TLV *value*
+    bytes are decoded (UTF-8 for a SIP/TEL URI); the TLV header and any
+    trailing erase filler are never fed to the text decoder.
+    """
     if not raw or all(b == 0xff for b in raw):
         return {'empty': True}
+    data = bytes(raw).rstrip(b'\xff')  # drop erase filler
+    if not data or (data[0] in (0x80, 0x81) and len(data) <= 2):
+        return {'empty': True}  # lone tag, or tag + zero-length value = unused
     texts = []
-    for tag, _length, value in parse_tlv(raw):
-        if tag == 0x80:
-            txt = value.decode('utf-8', 'replace').rstrip('\xff')
-            if txt:
-                texts.append(txt)
+    for tag, _length, value in parse_tlv(data):
+        if tag in (0x80, 0x81) and value:
+            texts.append(value.decode('utf-8', 'replace'))
     if texts:
         return {'text': texts[0] if len(texts) == 1 else ', '.join(texts)}
-    txt = raw.rstrip(b'\xff').decode('ascii', 'replace').strip()
-    return {'text': txt} if txt else {'raw': raw.hex().upper()}
+    return {'raw': raw.hex().upper()}
 
 
 def _decode_epsnsc(raw, p1=None):

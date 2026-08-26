@@ -1017,6 +1017,31 @@ class TestFileDecoders(unittest.TestCase):
         f = _decode_file_data('6f05', b'enru')
         self.assertEqual(f['languages'], ['en', 'ru'])
 
+    def test_ef_impu_empty_record(self):
+        # EF_IMPU record that is an unused identity: tag 0x80, zero-length
+        # value, FF erase filler. Must be reported empty, NOT decoded as text.
+        from simtrace2_pysniff.server.decode import _decode_file_data
+        f = _decode_file_data('6f04', bytes.fromhex('8000' + 'ff' * 73))
+        self.assertIn('empty', f)
+        self.assertNotIn('text', f)
+
+    def test_ef_impu_all_ff(self):
+        from simtrace2_pysniff.server.decode import _decode_file_data
+        f = _decode_file_data('6f04', b'\xff' * 75)
+        self.assertIn('empty', f)
+
+    def test_ef_impu_sip_uri(self):
+        from simtrace2_pysniff.server.decode import _decode_file_data
+        payload = b'\x80' + bytes([len(b'sip:alice@example.com')]) + b'sip:alice@example.com'
+        f = _decode_file_data('6f04', payload)
+        self.assertEqual(f.get('text'), 'sip:alice@example.com')
+
+    def test_ef_impu_lone_tag(self):
+        # A record containing only the identity tag (no length/value) is empty.
+        from simtrace2_pysniff.server.decode import _decode_file_data
+        f = _decode_file_data('6f04', b'\x80')
+        self.assertIn('empty', f)
+
     def test_adn(self):
         from simtrace2_pysniff.server.decode import _decode_file_data
         f = _decode_file_data('6f3a', bytes.fromhex(
