@@ -39,6 +39,8 @@ def main():
     p.add_argument('--log-interval', type=float, default=60.0,
                     help='Seconds between capture liveness heartbeat logs '
                          '(default: 60.0)')
+    p.add_argument('--log-requests', action='store_true', default=False,
+                   help='Log every HTTP request (off by default)')
     p.add_argument('--web-dir', default=_default_web_dir(), metavar='PATH',
                    help='Directory with the simtrace-analyser PWA static files to serve (default: <repo>/frontend)')
     args = p.parse_args()
@@ -56,6 +58,7 @@ def main():
     RequestHandler.db = db
     RequestHandler.capture = capture
     RequestHandler.capture_mode = args.capture
+    RequestHandler.log_requests = args.log_requests
 
     server = HTTPServer((args.host, args.port), RequestHandler)
     server.web_dir = args.web_dir

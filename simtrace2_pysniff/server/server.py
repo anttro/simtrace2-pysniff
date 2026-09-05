@@ -10,7 +10,7 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs, quote
 
 from .database import Database
-from .capture import CaptureManager, GsmtapListener, DirectSniffer
+from .capture import CaptureManager, GsmtapListener, DirectSniffer, _log
 from ..gsmtap import build_gsmtap_packet, GSMTAP_SIM_ATR, GSMTAP_SIM_APDU
 from ..pcap import build_pcap, parse_pcap, parse_pcapng
 from .. import __version__
@@ -42,9 +42,11 @@ class RequestHandler(BaseHTTPRequestHandler):
     db: Database = None
     capture: CaptureManager = None
     capture_mode: str = 'gsmtap'
+    log_requests: bool = False
 
     def log_message(self, fmt, *args):
-        print(f'[{self.log_date_time_string()}] {args[0]}', file=sys.stderr)
+        if self.log_requests:
+            print(f'[{self.log_date_time_string()}] {args[0]}', file=sys.stderr)
 
     def _send_json(self, data, status=200):
         body = json.dumps(data, ensure_ascii=False).encode('utf-8')
@@ -344,6 +346,9 @@ class RequestHandler(BaseHTTPRequestHandler):
         else:
             self.db.close_session(session_id)
 
+        _log(f'Session imported: session={session_id} '
+             f'name={name or "(untitled)"} messages={len(packets)} '
+             f'bytes={sum(len(p) for _, _, p, _ in packets)}')
         self._send_json({
             'session_id': session_id,
             'name': name,
@@ -357,6 +362,7 @@ class RequestHandler(BaseHTTPRequestHandler):
     def _handle_delete_session(self, session_id):
         if self.capture and self.capture.session_id == session_id:
             self.capture.stop_session()
+        _log(f'Session deleted: session={session_id}')
         self.db.delete_session(session_id)
         self.db.vacuum()
         self._send_json({'ok': True})
