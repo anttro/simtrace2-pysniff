@@ -26,6 +26,8 @@
     --warn-hover: #eab308;
     --warning-bg: #78350f;
     --error: #f87171;
+    --danger: #b91c1c;
+    --danger-hover: #dc2626;
     --code-bg: #1e293b;
     --scrollbar-track: #0f172a;
     --scrollbar-thumb: #334155;
@@ -57,6 +59,8 @@
     --warn-hover: #d97706;
     --warning-bg: #fef3c7;
     --error: #dc2626;
+    --danger: #dc2626;
+    --danger-hover: #b91c1c;
     --code-bg: #f3f4f6;
     --scrollbar-track: #fafafa;
     --scrollbar-thumb: #d1d5db;
@@ -106,8 +110,8 @@ body { font: 14px/1.5 system-ui, sans-serif; background: var(--bg); color: var(-
 .trace-topbar .filter-label { color: var(--text-muted); font-size: 13px; white-space: nowrap; }
 .trace-topbar button { padding: 8px 16px; background: var(--accent); color: #fff; border: none; border-radius: 4px; cursor: pointer; font-weight: 600; }
 .trace-topbar button:hover { background: var(--accent-hover); }
-.trace-topbar button.stop { background: var(--bg-input); color: var(--text); }
-.trace-topbar button.stop:hover { background: var(--bg-panel); }
+.trace-topbar button.stop { background: var(--danger); color: #fff; }
+.trace-topbar button.stop:hover { background: var(--danger-hover); }
 .trace-topbar button.connect { background: var(--warn); color: #0f172a; }
 .trace-topbar button.connect:hover { background: var(--warn-hover); }
 .trace-main { display: flex; flex: 1; overflow: hidden; }
@@ -2514,7 +2518,7 @@ function onFilterChange() {
 }
 
 // ──────────────────── Versioning ────────────────────
-const PWA_VERSION = '1.22.2';
+const PWA_VERSION = '1.22.3';
 const MIN_SERVER_VERSION = '1.0.0';
 
 function parseVersion(v) {
