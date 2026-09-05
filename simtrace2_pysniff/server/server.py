@@ -225,6 +225,8 @@ class RequestHandler(BaseHTTPRequestHandler):
         messages = self.db.get_messages(session_id, offset=offset, limit=limit)
         total = self.db.count_messages(session_id)
         type_counts = self.db.get_type_counts(session_id)
+        _log(f'Session opened: session={session_id} '
+             f'name={session.get("name") or "(untitled)"} messages={total}')
         self._send_json({
             'session': session,
             'messages': messages,
