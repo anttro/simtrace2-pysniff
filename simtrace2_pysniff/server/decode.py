@@ -4177,6 +4177,7 @@ def _decode_atr(data):
 
     interface = []
     protocols = []
+    pps = False
     flags = t0 & 0xF0
     i = 1
     level = 1
@@ -4229,7 +4230,10 @@ def _decode_atr(data):
             b = body[i]
             i += 1
             cur_t = b & 0x0F
-            protocols.append(_T_PROTOCOLS.get(cur_t, f'T={cur_t}'))
+            if cur_t == 15:
+                pps = True
+            else:
+                protocols.append(_T_PROTOCOLS.get(cur_t, f'T={cur_t}'))
             flags = b & 0xF0
             level += 1
         else:
@@ -4239,6 +4243,8 @@ def _decode_atr(data):
         result['interface'] = interface
     if protocols:
         result['protocols'] = protocols
+    if pps:
+        result['pps'] = True
 
     k = result['historical_len']
     if k and i + k <= len(body):
@@ -4246,7 +4252,7 @@ def _decode_atr(data):
     i += k
 
     # TCK present unless only T=0 is proposed (ISO 7816-3 §8.2.5).
-    only_t0 = not protocols or protocols == ['T=0']
+    only_t0 = (not protocols or protocols == ['T=0']) and not pps
     if not only_t0 and i < len(body):
         tck = body[i]
         check = 0

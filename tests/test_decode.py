@@ -898,6 +898,19 @@ class TestAtrPps(unittest.TestCase):
         self.assertEqual(r['historical']['category'], 'status information (life cycle)')
         self.assertEqual(r['historical']['life_cycle'], 'operational state (activated)')
 
+    def test_atr_t15_is_pps_capability(self):
+        from simtrace2_pysniff.server.decode import _decode_atr
+        # Real UICC ATR: T0=9F (TA1+TD1, 15 hist bytes), TA1=95, TD1=80 (T=0),
+        # TD2=1F (T=15 → PPS capability), TA3=C7 (clock stop + classes A/B/C).
+        r = _decode_atr(bytes.fromhex('3B9F95801FC78031E073FE21136364035B83079000F7'))
+        self.assertEqual(r['protocols'], ['T=0'])
+        self.assertTrue(r['pps'])
+        ta3 = r['interface'][1]
+        self.assertEqual(ta3['name'], 'TA3')
+        self.assertEqual(ta3['clock_stop'], 'no preference')
+        self.assertEqual(ta3['classes'], ['A', 'B', 'C'])
+        self.assertTrue(r['tck_valid'])
+
     def test_pps(self):
         from simtrace2_pysniff.server.decode import _decode_pps
         # FF 10 11 xx: PPS0=10 (T=0, PPS1 present), PPS1=11 (Fi=1,Di=1), PCK=XOR(FF,10,11)=FE
